@@ -1,0 +1,7 @@
+.edit-link {
+    text-decoration: none;
+}
+
+.edit-link:hover {
+    text-decoration: underline;
+}

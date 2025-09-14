@@ -1,0 +1,87 @@
+@rendermode InteractiveServer
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Volunteer.Services
+@inject IAuthService AuthService
+@inject NavigationManager NavigationManager
+@implements IDisposable
+
+<div class="navmenu">
+    <input type="checkbox" title="Menu expand/collapse toggle" id="navmenu-toggle" class="navmenu-icon" />
+    <label for="navmenu-toggle" class="navmenu-icon">
+        <FluentIcon Value="@(new Icons.Regular.Size20.Navigation())" Color="Color.Fill" />
+    </label>
+    <nav class="sitenav" aria-labelledby="main-menu">
+        <FluentNavMenu Id="main-menu" Collapsible="true" Width="250" Title="Navigation menu" @bind-Expanded="expanded"
+            CustomToggle="true">
+            <!-- Always visible pages -->
+            <FluentNavLink Href="/" Match="NavLinkMatch.All" Icon="@(new Icons.Regular.Size20.Home())"
+                IconColor="Color.Accent">Home</FluentNavLink>
+
+            <!-- Volunteer Data submenu - only visible when authenticated as admin -->
+            @if (AuthService.IsAdmin)
+            {
+                <FluentNavGroup Title="Volunteer Data" Icon="@(new Icons.Regular.Size20.DataHistogram())"
+                    Expanded="@volunteerDataExpanded">
+                    <FluentNavLink Href="interest" Icon="@(new Icons.Regular.Size20.Emoji())" IconColor="Color.Accent">
+                        Interest
+                    </FluentNavLink>
+                    <FluentNavLink Href="skill" Icon="@(new Icons.Regular.Size20.Star())" IconColor="Color.Accent">
+                        Skill
+                    </FluentNavLink>
+                    <FluentNavLink Href="source" Icon="@(new Icons.Regular.Size20.Database())" IconColor="Color.Accent">
+                        Source
+                    </FluentNavLink>
+                    <FluentNavLink Href="status" Icon="@(new Icons.Regular.Size20.Info())" IconColor="Color.Accent">
+                        Status
+                    </FluentNavLink>
+                    <FluentNavLink Href="role" Icon="@(new Icons.Regular.Size20.Info())" IconColor="Color.Accent">
+                        Role
+                    </FluentNavLink>
+                </FluentNavGroup>
+            }
+            else
+            {
+                <!-- Show login indicator when not admin -->
+                <FluentNavLink Href="/" Icon="@(new Icons.Regular.Size20.LockClosed())" IconColor="Color.Warning">
+                    Volunteer Data
+                </FluentNavLink>
+            }
+
+            <!-- Login/Logout Link -->
+            @if (AuthService.IsAuthenticated)
+            {
+                <FluentNavLink href="javascript:void(0)" @onclick="Logout" Icon="@(new Icons.Regular.Size20.SignOut())"
+                    IconColor="Color.Error">
+                    Logout
+                </FluentNavLink>
+            }
+        </FluentNavMenu>
+    </nav>
+</div>
+
+@code {
+    private bool expanded = true;
+    private bool volunteerDataExpanded = true;
+
+    protected override void OnInitialized()
+    {
+        AuthService.AuthenticationStateChanged += OnAuthenticationStateChanged;
+    }
+
+    private void OnAuthenticationStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Logout()
+    {
+        AuthService.Logout();
+        // Navigate normally (no full page reload) to avoid double initialization / dialog flash
+        NavigationManager.NavigateTo("/");
+    }
+
+    public void Dispose()
+    {
+        AuthService.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+}

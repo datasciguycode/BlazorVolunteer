@@ -1,0 +1,945 @@
+@page "/"
+@rendermode InteractiveServer
+
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components.DataGrid
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.Data.SqlClient
+@using Volunteer.Models
+@using Volunteer.Components
+@using Volunteer.Services
+@using InterestModel = Volunteer.Models.Interest
+@using SkillModel = Volunteer.Models.Skill
+@using SourceModel = Volunteer.Models.Source
+@using StatusModel = Volunteer.Models.Status
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject VolunteerContext _db
+@inject IAuthService AuthService
+@inject IUserService UserService
+@inject UserSessionState UserSessionState
+
+<PageTitle>Volunteers</PageTitle>
+
+<AuthorizedView RequiresAdmin="false">
+
+<style>
+    .user-grid {
+        --fluent-data-grid-cell-height: 40px;
+    }
+
+    .editable-row {
+        cursor: pointer;
+    }
+
+    .editable-row:hover {
+        background-color: var(--fill-color);
+    }
+    
+    .view-only-row {
+        cursor: default;
+    }
+
+    .search-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+        gap: 8px;
+        margin: 16px 0;
+        align-items: center;
+    }
+
+    .search-input {
+        padding: 6px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        width: 100%;
+    }
+
+    .wide-button {
+        min-width: 120px;
+    }
+
+    .standard-button {
+        min-width: 100px;
+    }
+</style>
+
+<!-- Control Row -->
+<div style="display: flex; align-items: center; gap: 16px; margin: 16px 0; flex-wrap: wrap;">
+
+    <div style="display: flex; align-items: center; gap: 8px; border: 1px solid #ddd; padding: 8px 12px; border-radius: 4px; background-color: #f9f9f9;">
+    @if (AuthService.CanAdd)
+    {
+        <FluentButton Appearance="Appearance.Accent" @onclick="OpenAddDialog" Class="wide-button">
+            Add Volunteer
+        </FluentButton>
+    
+        <FluentButton Appearance="Appearance.Neutral" @onclick="ClearAllSearches" Class="standard-button">
+            Clear Search
+        </FluentButton>
+    }
+    </div>
+    
+    <div style="display: flex; align-items: center; gap: 8px; border: 1px solid #ddd; padding: 8px 12px; border-radius: 4px; background-color: #f9f9f9;">
+        <FluentButton Appearance="Appearance.Accent" @onclick="RefreshData" Class="standard-button">
+            Show
+        </FluentButton>
+        <label for="recordLimit" style="margin: 0;">top</label>
+        <input type="number" id="recordLimit" @bind="recordLimit" @bind:after="OnRecordLimitChanged" 
+               min="1" max="10000" style="width: 80px; padding: 4px; border: 1px solid #ccc; border-radius: 3px;" />
+        @if (AuthService.IsBasicUser)
+        {
+            <span style="white-space: nowrap;">(@_userList.Count records created this session of @totalUserCount total)</span>
+        }
+        else
+        {
+            <span style="white-space: nowrap;">(@_userList.Count of @totalUserCount records loaded)</span>
+        }
+    </div>
+
+</div>
+
+@if (!string.IsNullOrEmpty(recordLimitError))
+{
+    <div style="color: red; font-size: 12px; margin: 0 0 8px 0; padding: 4px 8px; background-color: #fff2f2; border: 1px solid #ffcccc; border-radius: 3px;">
+        @recordLimitError
+    </div>
+}
+
+
+<br />
+
+<!-- Search Field -->
+<div class="search-row">
+    <input type="text" id="lastNameSearch" @bind="lastNameSearchText" @oninput="OnLastNameSearchInput"
+        placeholder="Last Name" class="search-input" />
+    <input type="text" id="firstNameSearch" @bind="searchText" @oninput="OnSearchInput" placeholder="First Name"
+        class="search-input" />
+    <input type="text" id="phoneSearch" @bind="phoneSearchText" @oninput="OnPhoneSearchInput" placeholder="Phone"
+        class="search-input" />
+    <input type="text" id="emailSearch" @bind="emailSearchText" @oninput="OnEmailSearchInput" placeholder="Email"
+        class="search-input" />
+    <input type="text" id="addressSearch" @bind="addressSearchText" @oninput="OnAddressSearchInput"
+        placeholder="Address" class="search-input" />
+    <input type="text" id="districtSearch" @bind="districtSearchText" @oninput="OnDistrictSearchInput"
+        placeholder="District" class="search-input" />
+    <input type="text" id="precinctSearch" @bind="precinctSearchText" @oninput="OnPrecinctSearchInput"
+        placeholder="Precinct" class="search-input" />
+    <input type="text" id="groupSearch" @bind="groupSearchText" @oninput="OnGroupSearchInput" placeholder="Group"
+        class="search-input" />
+    <input type="date" id="dateCreatedSearch" @bind-value="dateCreatedSearch" @oninput="OnDateCreatedSearchInput" 
+        class="search-input" title="Date Created" />
+    <input type="date" id="dateModifiedSearch" @bind-value="dateModifiedSearch" @oninput="OnDateModifiedSearchInput" 
+        class="search-input" title="Date Modified" />
+</div>
+
+<!-- Datagrid: render only when there are rows to show to avoid default empty placeholder -->
+@{
+    var filteredQuery = GetFilteredUsers();
+}
+
+@if (filteredQuery.Any())
+{
+    <FluentDataGrid Items="@filteredQuery" TGridItem="Volunteer.Models.User" Class="user-grid"
+        RowClass="@(_ => "editable-row")" OnRowDoubleClick="@OnRowDoubleClick">
+        <PropertyColumn Title="Last Name" Property="@(p => p.LastName)" />
+        <PropertyColumn Title="First Name" Property="@(p => p.FirstName)" />
+        <TemplateColumn Title="Phone">@FormatPhoneNumber(context.Phone)</TemplateColumn>
+        <PropertyColumn Title="Email" Property="@(p => p.Email)" />
+        <PropertyColumn Title="Address" Property="@(p => p.Address1)" />
+        <PropertyColumn Title="District" Property="@(p => p.DistrictNumber)" />
+        <PropertyColumn Title="Precinct" Property="@(p => p.PrecinctNumber)" />
+        <PropertyColumn Title="Group" Property="@(p => p.GroupNumber)" />
+        <PropertyColumn Title="Created" Property="@(p => p.DateCreated)" Format="MM/dd/yyyy" />
+        <PropertyColumn Title="Modified" Property="@(p => p.DateModified)" Format="MM/dd/yyyy" />
+    </FluentDataGrid>
+}
+
+<br />
+
+@if (AuthService.CanEdit || AuthService.IsBasicUser)
+{
+    <p style="font-size: 12px; color: #666; margin-top: 8px;">Double-click any row to edit</p>
+}
+else
+{
+    <p style="font-size: 12px; color: #666; margin-top: 8px;">View-only mode - editing restricted to administrators</p>
+}
+
+<UserDialog @ref="userDialog" @bind-DialogState="@_dialogState" SkillsList="@_skillList" InterestsList="@_interestList"
+    SourcesList="@_sourceList" StatusList="@_statusList" OnDialogAction="@HandleDialogAction" />
+
+</AuthorizedView>
+
+@code
+{
+    private DialogState _dialogState = new();
+    private List<Volunteer.Models.User> _userList = new();
+    private UserDialog? userDialog;
+    private List<SkillModel> _skillList = new();
+    private List<InterestModel> _interestList = new();
+    private List<SourceModel> _sourceList = new();
+    private List<StatusModel> _statusList = new();
+    // Backup of original user record before editing
+    private Volunteer.Models.User? _originalUserBackup;
+    private string searchText = string.Empty;
+    private string lastNameSearchText = string.Empty;
+    private string phoneSearchText = string.Empty;
+    private string emailSearchText = string.Empty;
+    private string addressSearchText = string.Empty;
+    private string precinctSearchText = string.Empty;
+    private string districtSearchText = string.Empty;
+    private string groupSearchText = string.Empty;
+    private DateTime? dateCreatedSearch = null;
+    private DateTime? dateModifiedSearch = null;
+    private string dateCreatedSearchText = string.Empty;
+    private string dateModifiedSearchText = string.Empty;
+
+    // Record limiting variables
+    private int recordLimit = 100;
+    private string recordLimitError = string.Empty;
+    private int totalUserCount = 0;
+
+    // --------------------------------------------------------------------
+    // Phone Formatting (for display in grid)
+    // --------------------------------------------------------------------
+
+    private string FormatPhoneNumber(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+            return string.Empty;
+
+        // Remove all non-digit characters
+        var digits = new string(phone.Where(char.IsDigit).ToArray());
+
+        // Format only 10-digit numbers
+        return digits.Length == 10
+        ? $"({digits[..3]}) {digits[3..6]}-{digits[6..10]}"
+        : phone; // Return original if not 10 digits
+    }
+
+    // --------------------------------------------------------------------
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // If user has Basic role, don't load any existing records
+            if (AuthService.IsBasicUser)
+            {
+                _userList = new List<Volunteer.Models.User>(); // Empty list for Basic users
+            }
+            else
+            {
+                // Load the specified number of users for non-Basic users
+                _userList = await UserService.GetTopUsersAsync(recordLimit);
+            }
+                
+            // Get total count for display (always show total count regardless of role)
+            totalUserCount = await UserService.GetTotalUserCountAsync();
+            
+            _skillList = await _db.Skill.OrderBy(s => s.Name).ToListAsync();
+            _interestList = await _db.Interest.OrderBy(i => i.Name).ToListAsync();
+            _sourceList = await _db.Source.OrderBy(s => s.Name).ToListAsync();
+            _statusList = await _db.Status.OrderBy(s => s.Name).ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading users or skills: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Helper method to refresh user list while respecting Basic user role restrictions
+    // --------------------------------------------------------------------
+
+    private async Task RefreshUserListAsync()
+    {
+        // If user has Basic role, only load records they created during this session
+        if (AuthService.IsBasicUser)
+        {
+            if (UserSessionState.SessionCreatedUserIds.Count == 0)
+            {
+                // No records created yet in this session
+                _userList = new List<Volunteer.Models.User>();
+            }
+            else
+            {
+                // Load only records created in this session
+                _userList = await _db.User
+                    .Where(u => UserSessionState.SessionCreatedUserIds.Contains(u.UserId))
+                    .ToListAsync();
+                Console.WriteLine($"Loaded {_userList.Count} session-created records for Basic user");
+            }
+        }
+        else
+        {
+            // Load records for non-Basic users
+            _userList = await UserService.GetTopUsersAsync(recordLimit);
+        }
+    }
+    
+    // --------------------------------------------------------------------
+    // Helper method to determine if a record is editable by the current user
+    // --------------------------------------------------------------------
+    
+    private bool IsRecordEditable(Volunteer.Models.User user)
+    {
+        // Admin and Power users can edit any record
+        if (AuthService.CanEdit)
+        {
+            return true;
+        }
+        
+        // Basic users can edit records they created during this session
+        if (AuthService.IsBasicUser && UserSessionState.SessionCreatedUserIds.Contains(user.UserId))
+        {
+            return true;
+        }
+        
+        // Otherwise, not editable
+        return false;
+    }
+
+    // --------------------------------------------------------------------
+    // Search Methods
+    // --------------------------------------------------------------------
+
+    private IQueryable<Volunteer.Models.User> GetFilteredUsers()
+    {
+        var filteredUsers = _userList.AsQueryable();
+
+        // For Basic users, only show records created in this session
+        if (AuthService.IsBasicUser)
+        {
+            filteredUsers = filteredUsers.Where(u => UserSessionState.SessionCreatedUserIds.Contains(u.UserId));
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.FirstName != null &&
+            u.FirstName.Contains(searchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(lastNameSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.LastName != null &&
+            u.LastName.Contains(lastNameSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(phoneSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.Phone != null &&
+            u.Phone.Contains(phoneSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(emailSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.Email != null &&
+            u.Email.Contains(emailSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(addressSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.Address1 != null &&
+            u.Address1.Contains(addressSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(precinctSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u =>
+                u.PrecinctNumber.ToString().Contains(precinctSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(districtSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u =>
+                u.DistrictNumber.ToString().Contains(districtSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(groupSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => 
+                u.GroupNumber.ToString().Contains(groupSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (dateCreatedSearch.HasValue)
+        {
+            // Filter by date created using exact date match
+            filteredUsers = filteredUsers.Where(u => 
+                u.DateCreated.Date == dateCreatedSearch.Value.Date);
+        }
+        else if (!string.IsNullOrWhiteSpace(dateCreatedSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u =>
+                u.DateCreated.ToString("MM/dd/yyyy").Contains(dateCreatedSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (dateModifiedSearch.HasValue)
+        {
+            // Filter by date modified using exact date match
+            filteredUsers = filteredUsers.Where(u => 
+                u.DateModified.Date == dateModifiedSearch.Value.Date);
+        }
+        else if (!string.IsNullOrWhiteSpace(dateModifiedSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u =>
+                u.DateModified.ToString("MM/dd/yyyy").Contains(dateModifiedSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return filteredUsers
+        .OrderBy(u => u.UserId);
+    }
+
+    // --------------------------------------------------------------------
+
+    private void UpdateSearchText(ChangeEventArgs e, ref string searchField)
+    {
+        searchField = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref searchText);
+    private void OnLastNameSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref lastNameSearchText);
+    private void OnPhoneSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref phoneSearchText);
+    private void OnEmailSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref emailSearchText);
+    private void OnAddressSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref addressSearchText);
+    private void OnDistrictSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref districtSearchText);
+    private void OnPrecinctSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref precinctSearchText);
+    private void OnGroupSearchInput(ChangeEventArgs e) => UpdateSearchText(e, ref groupSearchText);
+
+    private void OnDateCreatedSearchInput(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out DateTime date))
+        {
+            dateCreatedSearch = date;
+            dateCreatedSearchText = string.Empty; // Clear text search when using date
+        }
+        else
+        {
+            dateCreatedSearch = null;
+            dateCreatedSearchText = e.Value?.ToString() ?? string.Empty;
+        }
+        StateHasChanged();
+    }
+
+    private void OnDateModifiedSearchInput(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out DateTime date))
+        {
+            dateModifiedSearch = date;
+            dateModifiedSearchText = string.Empty; // Clear text search when using date
+        }
+        else
+        {
+            dateModifiedSearch = null;
+            dateModifiedSearchText = e.Value?.ToString() ?? string.Empty;
+        }
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void ClearAllSearches()
+    {
+        searchText = string.Empty;
+        lastNameSearchText = string.Empty;
+        phoneSearchText = string.Empty;
+        emailSearchText = string.Empty;
+        addressSearchText = string.Empty;
+        precinctSearchText = string.Empty;
+        districtSearchText = string.Empty;
+        groupSearchText = string.Empty;
+        dateCreatedSearch = null;
+        dateModifiedSearch = null;
+        dateCreatedSearchText = string.Empty;
+        dateModifiedSearchText = string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+    // Record Limit Methods
+    // --------------------------------------------------------------------
+
+    private void OnRecordLimitChanged()
+    {
+        if (recordLimit >= 1 && recordLimit <= 10000)
+        {
+            recordLimitError = string.Empty;
+        }
+        else
+        {
+            recordLimitError = "Record limit must be between 1 and 10,000";
+        }
+        StateHasChanged();
+    }
+
+    private async Task RefreshData()
+    {
+        if (!string.IsNullOrEmpty(recordLimitError))
+        {
+            return; // Don't refresh if there's an error
+        }
+
+        try
+        {
+            // If user has Basic role, don't load any existing records
+            if (AuthService.IsBasicUser)
+            {
+                _userList = new List<Volunteer.Models.User>(); // Empty list for Basic users
+            }
+            else
+            {
+                // Use UserService to get the records for non-Basic users
+                _userList = await UserService.GetTopUsersAsync(recordLimit);
+            }
+            
+            // Get total count for display (always show total count regardless of role)
+            totalUserCount = await UserService.GetTotalUserCountAsync();
+            
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error refreshing data: {ex.Message}");
+            recordLimitError = "Error loading data. Please try again.";
+            StateHasChanged();
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Dialog Methods
+    // --------------------------------------------------------------------
+
+    private void OpenAddDialog()
+    {
+        // Clear the backup since we're creating a new record
+        _originalUserBackup = null;
+        
+        _dialogState.ShowForAdd(); // This will clear ErrorMessage in ShowForAdd()
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void OpenEditDialog(Volunteer.Models.User user)
+    {
+        // Create a deep copy of the original user record before editing
+        _originalUserBackup = new Volunteer.Models.User
+        {
+            UserId = user.UserId,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Phone = user.Phone,
+            Email = user.Email,
+            Address1 = user.Address1,
+            PrecinctNumber = user.PrecinctNumber,
+            GroupNumber = user.GroupNumber,
+            DistrictNumber = user.DistrictNumber,
+            SourceId = user.SourceId,
+            StatusId = user.StatusId
+        };
+        
+        _dialogState.ShowForEdit(user); // This will clear ErrorMessage in ShowForEdit()
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task CloseUserDialog()
+    {
+        // If we're in edit mode and have a backup, ensure any tracked entity is reset
+        if (_dialogState.IsEditMode && _originalUserBackup != null)
+        {
+            // Get the entity being tracked by EF Core
+            var trackedEntity = await _db.User.FindAsync(_originalUserBackup.UserId);
+            if (trackedEntity != null)
+            {
+                // Detach the entity to avoid tracking changes that weren't saved
+                _db.Entry(trackedEntity).State = EntityState.Detached;
+            }
+        }
+        
+        // Reset dialog state, discarding any unsaved changes
+        _dialogState.Reset();
+        
+        // Clear the backup
+        _originalUserBackup = null;
+        
+        // Refresh the user list from the database to ensure datagrid shows the actual saved data
+        // This ensures any unsaved changes don't affect the UI
+        await RefreshUserListAsync();
+        
+        // Explicitly trigger UI refresh to ensure any potential UI changes are discarded
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task HandleDialogAction(DialogAction action)
+    {
+        switch (action.Type)
+        {
+            case DialogActionType.Save:
+                _dialogState.ErrorMessage = string.Empty; // Clear any previous error messages before attempting save
+                await SaveUserAsync();
+                break;
+
+            case DialogActionType.Cancel:
+                // Cancel all changes in the dialog without saving to database
+                // This closes the dialog and refreshes the UI state with data from the database
+                await CloseUserDialog();
+                break;
+
+            case DialogActionType.DeleteSkill:
+                if (action.Data is int skillId)
+                {
+                    await DeleteUserSkillAsync(skillId);
+                }
+                break;
+
+            case DialogActionType.DeleteInterest:
+                if (action.Data is int interestId)
+                {
+                    await DeleteUserInterestAsync(interestId);
+                }
+                break;
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    /// <summary>
+    /// Saves or updates a user in the database.
+    /// For new users: Creates the user and updates the dialog with the new ID
+    /// For existing users: Updates the user's information
+    /// In both cases, refreshes the user list in the UI
+    /// </summary>
+    private async Task SaveUserAsync()
+    {
+        try
+        {
+            // Validate required fields before saving
+            if (string.IsNullOrWhiteSpace(_dialogState.CurrentUser.Phone))
+            {
+                _dialogState.ErrorMessage = "Phone number is required.";
+                return;
+            }
+            
+            // Check if a different user already has this phone number or email
+            // Extract only digits from the phone number for comparison
+            var phoneDigitsOnly = new string(_dialogState.CurrentUser.Phone.Where(char.IsDigit).ToArray());
+            
+            // Get all existing users for validation
+            var existingUsers = await _db.User.ToListAsync();
+            
+            // Check existing records for the same phone digits if this is a new user or changing phone
+            if (!_dialogState.IsEditMode || 
+                (_originalUserBackup != null && 
+                 new string(_originalUserBackup.Phone.Where(char.IsDigit).ToArray()) != phoneDigitsOnly))
+            {
+                var matchingPhoneUser = existingUsers.FirstOrDefault(u => 
+                    new string(u.Phone.Where(char.IsDigit).ToArray()) == phoneDigitsOnly && 
+                    u.UserId != _dialogState.CurrentUser.UserId);
+                    
+                if (matchingPhoneUser != null)
+                {
+                    _dialogState.ErrorMessage = $"A user with this phone number already exists (User: {matchingPhoneUser.FirstName} {matchingPhoneUser.LastName}). Please use a different phone number.";
+                    return;
+                }
+            }
+            
+            // Check for duplicate email
+            if (!_dialogState.IsEditMode || 
+                (_originalUserBackup != null && 
+                 _originalUserBackup.Email?.ToLower().Trim() != _dialogState.CurrentUser.Email?.ToLower().Trim()))
+            {
+                var normalizedInputEmail = _dialogState.CurrentUser.Email?.ToLower().Trim() ?? string.Empty;
+                
+                var matchingUser = existingUsers.FirstOrDefault(u => 
+                    (u.Email?.ToLower().Trim() ?? string.Empty) == normalizedInputEmail && 
+                    u.UserId != _dialogState.CurrentUser.UserId);
+                
+                if (matchingUser != null)
+                {
+                    _dialogState.ErrorMessage = $"A user with this email address already exists (User: {matchingUser.FirstName} {matchingUser.LastName}). Please use a different email address.";
+                    return;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(_dialogState.CurrentUser.Email))
+            {
+                _dialogState.ErrorMessage = "Email is required.";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_dialogState.CurrentUser.FirstName))
+            {
+                _dialogState.ErrorMessage = "First name is required.";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_dialogState.CurrentUser.LastName))
+            {
+                _dialogState.ErrorMessage = "Last name is required.";
+                return;
+            }
+
+            if (_dialogState.IsEditMode)
+            {
+                // Update existing user
+                var existingUser = await _db.User.FindAsync(_dialogState.CurrentUser.UserId)
+                ?? throw new InvalidOperationException($"User with ID {_dialogState.CurrentUser.UserId} not found.");
+
+                existingUser.FirstName = _dialogState.CurrentUser.FirstName;
+                existingUser.LastName = _dialogState.CurrentUser.LastName;
+                existingUser.Phone = _dialogState.CurrentUser.Phone ?? string.Empty; // Ensure not null
+                existingUser.Email = _dialogState.CurrentUser.Email ?? string.Empty; // Ensure not null
+                existingUser.Address1 = _dialogState.CurrentUser.Address1 ?? string.Empty; // Ensure not null
+                existingUser.PrecinctNumber = _dialogState.CurrentUser.PrecinctNumber;
+                existingUser.GroupNumber = _dialogState.CurrentUser.GroupNumber;
+                existingUser.DistrictNumber = _dialogState.CurrentUser.DistrictNumber;
+                existingUser.SourceId = _dialogState.CurrentUser.SourceId;
+
+                Console.WriteLine($"UPDATE: User ID {existingUser.UserId}, Email: '{existingUser.Email}'");
+                await _db.SaveChangesAsync();
+                Console.WriteLine("UPDATE: Database SaveChanges completed");
+            }
+            else
+            {
+                // Create new user
+                var newUser = new Volunteer.Models.User
+                {
+                    FirstName = _dialogState.CurrentUser.FirstName,
+                    LastName = _dialogState.CurrentUser.LastName,
+                    Phone = _dialogState.CurrentUser.Phone ?? string.Empty, // Ensure not null
+                    Email = _dialogState.CurrentUser.Email ?? string.Empty, // Ensure not null
+                    Address1 = _dialogState.CurrentUser.Address1 ?? string.Empty, // Ensure not null
+                    PrecinctNumber = _dialogState.CurrentUser.PrecinctNumber,
+                    GroupNumber = _dialogState.CurrentUser.GroupNumber,
+                    DistrictNumber = _dialogState.CurrentUser.DistrictNumber,
+                    SourceId = _dialogState.CurrentUser.SourceId,
+                    DateCreated = DateTime.Now
+                    // DateModified will use database default
+                };
+
+                _db.User.Add(newUser);
+                await _db.SaveChangesAsync(); // Save first to get the new ID
+
+                // Update dialog user with the new ID from the saved user
+                _dialogState.CurrentUser.UserId = newUser.UserId;
+                
+                // If user is Basic, track this ID as created in this session
+                if (AuthService.IsBasicUser)
+                {
+                    UserSessionState.SessionCreatedUserIds.Add(newUser.UserId);
+                    Console.WriteLine($"Added user ID {newUser.UserId} to session tracking list");
+                }
+                
+                _dialogState.ShowForEdit(_dialogState.CurrentUser); // Switch to edit mode
+            }
+
+            await RefreshUserListAsync(); // Refresh the user list
+            Console.WriteLine($"User list refreshed. Count: {_userList.Count}");
+            Console.WriteLine($"Current user after save - ID: {_dialogState.CurrentUser.UserId}, Email: {_dialogState.CurrentUser.Email}");
+            
+            // Check if the user exists in the refreshed list
+            var userInList = _userList.FirstOrDefault(u => u.UserId == _dialogState.CurrentUser.UserId);
+            if (userInList != null)
+            {
+                Console.WriteLine($"User found in list - ID: {userInList.UserId}, Email: {userInList.Email}");
+            }
+            else
+            {
+                Console.WriteLine("User not found in refreshed list!");
+            }
+            
+            StateHasChanged();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is SqlException sqlEx && sqlEx.Number == 2601)
+        {
+            // Handle duplicate key error (email or phone)
+            var duplicateValue = ExtractDuplicateValue(sqlEx.Message);
+            var errorMessage = sqlEx.Message.ToLower();
+            
+            if (errorMessage.Contains("ix_user_email_unique"))
+            {
+                _dialogState.ErrorMessage = $"A user with the email address '{duplicateValue}' already exists. Please use a different email address.";
+            }
+            else if (errorMessage.Contains("ix_user_phone_unique"))
+            {
+                Console.WriteLine($"DEBUG: Full SQL error message: {sqlEx.Message}");
+                Console.WriteLine($"DEBUG: Entered phone '{_dialogState.CurrentUser.Phone}' vs duplicate value '{duplicateValue}'");
+                
+                _dialogState.ErrorMessage = $"A user with the phone number '{duplicateValue}' already exists. Please use a different phone number.";
+                Console.WriteLine($"Duplicate phone error: {duplicateValue}");
+            }
+            else
+            {
+                _dialogState.ErrorMessage = $"A duplicate value '{duplicateValue}' already exists. Please check your input.";
+                Console.WriteLine($"Duplicate value error: {duplicateValue}");
+            }
+            
+            // If this is an edit operation and we have a backup, revert the in-memory entity to avoid EF tracking the invalid changes
+            if (_dialogState.IsEditMode && _originalUserBackup != null)
+            {
+                // Get the entity being tracked by EF Core
+                var trackedEntity = await _db.User.FindAsync(_originalUserBackup.UserId);
+                if (trackedEntity != null)
+                {
+                    // Detach the entity from context to avoid tracking
+                    _db.Entry(trackedEntity).State = EntityState.Detached;
+                    
+                    // Refresh user list to ensure we have the original data
+                    await RefreshUserListAsync();
+                    
+                    // Restore the original values in the dialog
+                    _dialogState.CurrentUser = new Volunteer.Models.User
+                    {
+                        UserId = _originalUserBackup.UserId,
+                        FirstName = _originalUserBackup.FirstName,
+                        LastName = _originalUserBackup.LastName,
+                        Phone = _originalUserBackup.Phone,
+                        Email = _originalUserBackup.Email,
+                        Address1 = _originalUserBackup.Address1,
+                        PrecinctNumber = _originalUserBackup.PrecinctNumber,
+                        GroupNumber = _originalUserBackup.GroupNumber,
+                        DistrictNumber = _originalUserBackup.DistrictNumber,
+                        SourceId = _originalUserBackup.SourceId,
+                        StatusId = _originalUserBackup.StatusId
+                    };
+                }
+            }
+            
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            // TODO: Add proper error handling/logging
+            Console.WriteLine($"Error saving user: {ex.Message}");
+            throw; // Re-throw to let the UI handle the error
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private void OnRowDoubleClick(FluentDataGridRow<Volunteer.Models.User> row)
+    {
+        // For Basic users, all visible rows are already filtered to only include their created records
+        // For Admin/Power users, we check CanEdit as before
+        if (AuthService.IsBasicUser || AuthService.CanEdit)
+        {
+            OpenEditDialog(row.Item!);
+        }
+    }
+
+    // --------------------------------------------------------------------
+    private async Task DeleteUserSkillAsync(int userSkillId)
+    {
+        try
+        {
+            var userSkill = await _db.UserSkill.FindAsync(userSkillId)
+            ?? throw new InvalidOperationException($"Skill with ID {userSkillId} not found.");
+
+            _db.UserSkill.Remove(userSkill);
+            await _db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            // TODO: Add proper error handling/logging
+            Console.WriteLine($"Error deleting user skill: {ex.Message}");
+            throw; // Re-throw to let the UI handle the error
+        }
+    }
+
+    // --------------------------------------------------------------------
+    private async Task DeleteUserInterestAsync(int userInterestId)
+    {
+        try
+        {
+            var userInterest = await _db.UserInterest.FindAsync(userInterestId)
+            ?? throw new InvalidOperationException($"Interest with ID {userInterestId} not found.");
+
+            _db.UserInterest.Remove(userInterest);
+            await _db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            // TODO: Add proper error handling/logging
+            Console.WriteLine($"Error deleting user interest: {ex.Message}");
+            throw; // Re-throw to let the UI handle the error
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Helper Methods
+    // --------------------------------------------------------------------
+
+    private string ExtractDuplicateValue(string errorMessage)
+    {
+        // Extract the duplicate value from the SQL Server error message
+        // Message format: "...The duplicate key value is (value)."
+        var startIndex = errorMessage.IndexOf("The duplicate key value is (");
+        if (startIndex == -1) return "unknown";
+
+        startIndex += "The duplicate key value is (".Length;
+        
+        // First, check if this is an email or phone error by looking at the error message
+        var lowerErrorMessage = errorMessage.ToLower();
+        bool isEmail = lowerErrorMessage.Contains("ix_user_email_unique");
+        bool isPhone = lowerErrorMessage.Contains("ix_user_phone_unique");
+        
+        // For both phone numbers with formatting like "(555) 123-4567" and 
+        // emails which might contain special characters, we need to extract the entire value
+        // Look for the last closing parenthesis followed by a period
+        var lastParenIndex = errorMessage.LastIndexOf(").");
+        if (lastParenIndex != -1) {
+            // Extract everything between "The duplicate key value is (" and the last ")."
+            var value = errorMessage.Substring(startIndex, lastParenIndex - startIndex);
+            
+            // Clean up the value based on type
+            if (isEmail) {
+                // For emails, remove any leading/trailing quotes if present
+                return value.Trim('"', '\'');
+            }
+            else if (isPhone) {
+                // For phone numbers, return as is (with formatting)
+                return value;
+            }
+            else {
+                return value;
+            }
+        }
+        
+        // Fallback to original method if the format is different
+        var endIndex = errorMessage.IndexOf(")", startIndex);
+        if (endIndex == -1) return "unknown";
+
+        var result = errorMessage.Substring(startIndex, endIndex - startIndex);
+        return result.Trim('"', '\''); // Clean up any quotes that might be around the value
+    }
+
+    // --------------------------------------------------------------------
+
+    // Listen for authentication state changes to clear session state
+    [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; }
+
+    [Inject] private NavigationManager NavigationManager { get; set; }
+
+    protected override void OnInitialized()
+    {
+        AuthStateProvider.AuthenticationStateChanged += async (task) =>
+        {
+            var authState = await task;
+            if (!authState.User.Identity?.IsAuthenticated ?? true)
+            {
+                // On logout, clear session state
+                UserSessionState.Clear();
+                _userList = new List<Volunteer.Models.User>();
+                // Force a full page reload by navigating to the home page
+                NavigationManager.NavigateTo("/", forceLoad: true);
+            }
+        };
+    }
+}

@@ -1,0 +1,294 @@
+@page "/interest"
+@rendermode InteractiveServer
+
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components.DataGrid
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Web
+@using Volunteer.Models
+@using Volunteer.Services
+@using Volunteer.Components
+@using InterestModel = Volunteer.Models.Interest
+
+@inject IInterestService _interestService
+
+<PageTitle>Interests</PageTitle>
+
+<AuthorizedView RequiresAdmin="true">
+
+<style>
+    .interest-grid {
+        --fluent-data-grid-cell-height: 40px;
+    }
+
+    .editable-row {
+        cursor: pointer;
+    }
+
+    .editable-row:hover {
+        background-color: var(--fill-color);
+    }
+
+    .search-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+        margin: 16px 0;
+        align-items: center;
+    }
+
+    .search-input {
+        padding: 6px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        width: 100%;
+    }
+
+    .wide-button {
+        min-width: 120px;
+    }
+
+    .standard-button {
+        min-width: 100px;
+    }
+</style>
+
+<br />
+
+<!-- Add Interest and Clear Search Buttons -->
+<div style="margin: 8px 0;">
+    <FluentButton Appearance="Appearance.Accent" @onclick="() => OpenAddDialog()" Class="wide-button" style="margin-right: 16px;">Add Interest</FluentButton>
+    <FluentButton Appearance="Appearance.Neutral" @onclick="ClearSearch" Class="standard-button">Clear Search</FluentButton>
+</div>
+
+<br />
+
+<!-- Search Field -->
+<div class="search-row">
+    <input type="text" id="nameSearch" @bind="searchText" @oninput="OnSearchInput" placeholder="Search by name..."
+        class="search-input" />
+</div>
+
+<!-- Datagrid -->
+<FluentDataGrid Items="@GetFilteredInterests()" TGridItem="InterestModel" Class="interest-grid"
+    RowClass="@(_ => "editable-row")" OnRowDoubleClick="@OnRowDoubleClick">
+    <PropertyColumn Title="Interest" Property="@(p => p.Name)" />
+    <PropertyColumn Title="Created" Property="@(p => p.DateCreated)" Format="MM/dd/yyyy" />
+    <PropertyColumn Title="Modified" Property="@(p => p.DateModified)" Format="MM/dd/yyyy" />
+    <TemplateColumn Title="Actions">
+        <FluentButton Appearance="Appearance.Lightweight" @onclick="async () => await OpenEditDialog(context)" 
+            IconEnd="@(new Icons.Regular.Size16.Edit())" Title="Edit" />
+        @* <FluentButton Appearance="Appearance.Lightweight" @onclick="() => DeleteInterest(context)" 
+            IconEnd="@(new Icons.Regular.Size16.Delete())" Title="Delete" /> *@
+    </TemplateColumn>
+</FluentDataGrid>
+
+<br />
+
+<p style="font-size: 12px; color: #666; margin-top: 8px;">Double-click any row to edit</p>
+
+<!-- Simple Dialog for Add/Edit -->
+<FluentDialog @ref="interestDialog" Hidden="@(!_showDialog)" TrapFocus="true" Modal="true" OnDismiss="CloseDialog" @onkeydown="@((e) => HandleKeyDown(e))">
+    <FluentDialogHeader>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h3 style="margin: 0;">@(_isEditMode ? "Edit Interest" : "Add New Interest")</h3>
+            <FluentButton 
+                Appearance="Appearance.Lightweight"
+                @onclick="CloseDialog"
+                Title="Finish"
+                IconEnd="@(new Icons.Regular.Size16.Dismiss())"
+                style="min-width: 32px; padding: 4px;" />
+        </div>
+    </FluentDialogHeader>
+
+    <FluentDialogBody>
+        <EditForm Model="@_currentInterest" OnValidSubmit="SaveInterest" FormName="InterestForm">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <FluentStack Orientation="Orientation.Vertical" Gap="3" Style="min-width: 300px;">
+                <FluentTextField @ref="nameField" Label="Name:" @bind-Value="_currentInterest.Name"
+                    Required="true" Style="width: 100%;" />
+            </FluentStack>
+        </EditForm>
+    </FluentDialogBody>
+
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" @onclick="SaveInterest" Class="standard-button">Save</FluentButton>
+        <FluentButton Appearance="Appearance.Neutral" @onclick="CloseDialog" Class="standard-button">Cancel</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code {
+    private List<InterestModel> _interestList = new();
+    private FluentDialog? interestDialog;
+    private FluentTextField? nameField;
+    private string searchText = string.Empty;
+    private bool _showDialog = false;
+    private bool _isEditMode = false;
+    private InterestModel _currentInterest = new();
+
+    // --------------------------------------------------------------------
+    
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _interestList = await _interestService.ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading interests: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Search Methods
+    // --------------------------------------------------------------------
+
+    private IQueryable<InterestModel> GetFilteredInterests()
+    {
+        var filteredInterests = _interestList.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            filteredInterests = filteredInterests.Where(i => i.Name != null &&
+                i.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return filteredInterests.OrderBy(i => i.Name);
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearch()
+    {
+        searchText = string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+    // Dialog Methods
+    // --------------------------------------------------------------------
+
+    private async Task OpenAddDialog()
+    {
+        _currentInterest = new InterestModel();
+        _isEditMode = false;
+        _showDialog = true;
+        StateHasChanged();
+        await Task.Delay(50); // Small delay to ensure dialog is rendered
+        await FocusNameField();
+    }
+
+    private async Task OpenEditDialog(InterestModel interest)
+    {
+        _currentInterest = new InterestModel 
+        { 
+            InterestId = interest.InterestId, 
+            Name = interest.Name 
+        };
+        _isEditMode = true;
+        _showDialog = true;
+        StateHasChanged();
+        await Task.Delay(50); // Small delay to ensure dialog is rendered
+        await FocusNameField();
+    }
+
+    private void CloseDialog()
+    {
+        _showDialog = false;
+        _currentInterest = new InterestModel();
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task SaveInterest()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_currentInterest.Name))
+                return;
+
+            Console.WriteLine($"Saving Interest: ID={_currentInterest.InterestId}, Name='{_currentInterest.Name}', IsEditMode={_isEditMode}");
+
+            if (_isEditMode)
+            {
+                await _interestService.UpdateAsync(_currentInterest);
+                Console.WriteLine("Interest updated successfully");
+            }
+            else
+            {
+                await _interestService.AddAsync(_currentInterest);
+                Console.WriteLine("Interest added successfully");
+            }
+
+            _interestList = await _interestService.ToListAsync(); // Refresh the list
+            CloseDialog();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving interest: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task DeleteInterest(InterestModel interest)
+    {
+        try
+        {
+            await _interestService.DeleteAsync(interest.InterestId);
+            _interestList = await _interestService.ToListAsync(); // Refresh the list
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error deleting interest: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private async void OnRowDoubleClick(FluentDataGridRow<InterestModel> row)
+    {
+        await OpenEditDialog(row.Item!);
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task FocusNameField()
+    {
+        try
+        {
+            if (nameField != null)
+            {
+                await nameField.Element!.FocusAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error setting focus: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseDialog();
+        }
+    }
+
+    // --------------------------------------------------------------------
+}
+
+</AuthorizedView>

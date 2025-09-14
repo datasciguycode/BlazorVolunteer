@@ -1,0 +1,105 @@
+@rendermode InteractiveServer
+@using Volunteer.Services
+@using Volunteer.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject IAuthService AuthService
+@inject NavigationManager NavigationManager
+@implements IDisposable
+
+@if (_isInitialRender)
+{
+    <!-- Show nothing during initial render to prevent flash -->
+    <div style="height: 1px;"></div>
+}
+else if (RequiresAdmin ? !AuthService.IsAdmin : !AuthService.IsAuthenticated)
+{
+    @if (RequiresAdmin && AuthService.IsAuthenticated && !AuthService.IsAdmin)
+    {
+        <!-- User is authenticated but doesn't have admin privileges -->
+        <div class="unauthorized-access">
+            <h2>Administrative Access Required</h2>
+            <p>You are logged in as a basic user. Administrative privileges are required to access this section.</p>
+            <FluentButton Appearance="Appearance.Accent" @onclick="GoToHome">Go to Home</FluentButton>
+        </div>
+    }
+    else
+    {
+        <!-- User needs to authenticate - show login dialog directly -->
+        <LoginDialog ShowDialog="true" ShowDialogChanged="@OnLoginDialogChanged" OnLoginResult="@OnLoginResult" />
+    }
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public bool RequiresAdmin { get; set; } = true;
+
+    private bool _isInitialRender = true;
+
+    protected override void OnInitialized()
+    {
+        // Subscribe to authentication state changes
+        AuthService.AuthenticationStateChanged += OnAuthenticationStateChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Small delay to prevent flash, then show content
+            await Task.Delay(50);
+            _isInitialRender = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnAuthenticationStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnLoginDialogChanged(bool isVisible)
+    {
+        // Handle dialog visibility changes if needed
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnLoginResult(bool success)
+    {
+        if (success)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void GoToHome()
+    {
+        NavigationManager.NavigateTo("/");
+    }
+
+    public void Dispose()
+    {
+        AuthService.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+}
+
+<style>
+    .unauthorized-access {
+        text-align: center;
+        margin-top: 100px;
+        padding: 20px;
+    }
+
+    .unauthorized-access h2 {
+        color: #d32f2f;
+        margin-bottom: 15px;
+    }
+
+    .unauthorized-access p {
+        margin-bottom: 20px;
+        color: #666;
+    }
+</style>

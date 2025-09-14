@@ -1,0 +1,491 @@
+@page "/user"
+@rendermode InteractiveServer
+
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components.DataGrid
+@using Microsoft.EntityFrameworkCore
+@using Volunteer.Models
+
+@inject VolunteerContext _db
+
+<PageTitle>Volunteers</PageTitle>
+
+<style>
+    .user-grid {
+        --fluent-data-grid-cell-height: 40px;
+    }
+
+    .editable-row {
+        cursor: pointer;
+    }
+
+    .editable-row:hover {
+        background-color: var(--fill-color);
+    }
+
+    .search-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+        gap: 8px;
+        margin: 16px 0;
+        align-items: center;
+    }
+
+    .search-input {
+        padding: 6px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        width: 100%;
+    }
+
+    .dialog-tabs {
+        min-height: 300px;
+    }
+
+    .tab-content {
+        padding: 16px 0;
+    }
+
+    .standard-button {
+        min-width: 100px;
+    }
+
+    .wide-button {
+        min-width: 120px;
+    }
+</style>
+
+<br />
+
+<!-- Add User Button -->
+
+<!-- Clear Search Button -->
+<div style="margin: 8px 0;">
+    <FluentButton Appearance="Appearance.Accent" @onclick="OpenAddDialog" Class="wide-button" style="margin-right: 16px;">Add Volunteer
+    </FluentButton>
+    <FluentButton Appearance="Appearance.Neutral" @onclick="ClearAllSearches" Class="standard-button">Clear Search
+    </FluentButton>
+</div>
+
+<br />
+
+<!-- Search Field -->
+<div class="search-row">
+    <input type="text" id="firstNameSearch" @bind="searchText" @oninput="OnSearchInput" placeholder="First Name"
+        class="search-input" />
+    <input type="text" id="lastNameSearch" @bind="lastNameSearchText" @oninput="OnLastNameSearchInput"
+        placeholder="Last Name" class="search-input" />
+    <input type="text" id="phoneSearch" @bind="phoneSearchText" @oninput="OnPhoneSearchInput" placeholder="Phone"
+        class="search-input" />
+    <input type="text" id="emailSearch" @bind="emailSearchText" @oninput="OnEmailSearchInput" placeholder="Email"
+        class="search-input" />
+    <input type="text" id="addressSearch" @bind="addressSearchText" @oninput="OnAddressSearchInput"
+        placeholder="Address" class="search-input" />
+</div>
+
+<!-- Datagrid -->
+<FluentDataGrid Items="@GetFilteredUsers()" TGridItem="Volunteer.Models.User" Class="user-grid"
+    RowClass="@(_ => "editable-row")" OnRowDoubleClick="@OnRowDoubleClick">
+    <PropertyColumn Title="First Name" Property="@(p => p.FirstName)" />
+    <PropertyColumn Title="Last Name" Property="@(p => p.LastName)" />
+    <PropertyColumn Title="Phone" Property="@(p => p.Phone)" />
+    <PropertyColumn Title="Email" Property="@(p => p.Email)" />
+    <PropertyColumn Title="Address" Property="@(p => p.Address1)" />
+</FluentDataGrid>
+
+<br />
+
+<p style="font-size: 12px; color: #666; margin-top: 8px;">Double-click any row to edit</p>
+
+<!--  Add User Dialog -->
+<FluentDialog @ref="addDialog" Hidden="@addDialogHidden" TrapFocus="true" Modal="true">
+    <FluentDialogHeader>
+        <h3>Add New Volunteer</h3>
+    </FluentDialogHeader>
+
+    <FluentDialogBody>
+        <EditForm Model="@_user" OnValidSubmit="AddUserAsync" FormName="AddUserForm">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <FluentStack Orientation="Orientation.Vertical" Gap="3">
+                <FluentTextField @ref="addFirstNameField" Label="First Name:" @bind-Value="_user.FirstName"
+                    Required="true" />
+                <FluentTextField Label="Last Name:" @bind-Value="_user.LastName" Required="true" />
+                <FluentTextField Label="Phone:" @bind-Value="_user.Phone" />
+                <FluentTextField Label="Email:" @bind-Value="_user.Email" InputMode="InputMode.Email" />
+                <FluentTextField Label="Address:" @bind-Value="_user.Address1" />
+            </FluentStack>
+        </EditForm>
+    </FluentDialogBody>
+
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Neutral" @onclick="CloseAddDialog" Class="standard-button">Cancel
+        </FluentButton>
+        <FluentButton Appearance="Appearance.Accent" @onclick="AddUserAsync" Class="standard-button">&nbsp; Add &nbsp;
+        </FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+<!-- /Add User Dialog -->
+
+<!-- Edit User Dialog -->
+<FluentDialog @ref="editDialog" Hidden="@editDialogHidden" TrapFocus="true" Modal="true">
+    <FluentDialogHeader>
+        <h3>Update Volunteer</h3>
+    </FluentDialogHeader>
+
+    <FluentDialogBody>
+        <EditForm Model="@_editUser" OnValidSubmit="UpdateUserAsync" FormName="EditUserForm">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <FluentTabs Class="dialog-tabs" ActiveTabId="@activeTabId" OnTabChange="OnTabChanged">
+                <FluentTab Label="Volunteer" Id="user-info">
+                    <div class="tab-content">
+                        <FluentStack Orientation="Orientation.Vertical" Gap="3">
+                            <FluentTextField @ref="editFirstNameField" Label="First Name:"
+                                @bind-Value="_editUser.FirstName" Required="true" />
+                            <FluentTextField Label="Last Name:" @bind-Value="_editUser.LastName" Required="true" />
+                            <FluentTextField Label="Phone:" @bind-Value="_editUser.Phone" />
+                            <FluentTextField Label="Email:" @bind-Value="_editUser.Email" InputMode="InputMode.Email" />
+                            <FluentTextField Label="Address:" @bind-Value="_editUser.Address1" />
+                        </FluentStack>
+                    </div>
+                </FluentTab>
+
+                <FluentTab Label="Skills" Id="skills">
+                    <div class="tab-content">
+                        <FluentStack Orientation="Orientation.Vertical" Gap="3">
+                            <FluentStack Orientation="Orientation.Vertical" Gap="1">
+                                <FluentCheckbox @bind-Value="canLiftHeavyItems" Label="Can Lift Heavy Items" />
+                                <FluentCheckbox @bind-Value="hasFirstAidCertification" Label="First Aid Certified" />
+                                <FluentCheckbox @bind-Value="canWorkWithChildren" Label="Can Work with Children" />
+                                <FluentCheckbox @bind-Value="speaksBilingually" Label="Speaks Multiple Languages" />
+                                <FluentCheckbox @bind-Value="hasComputerSkills" Label="Has Computer Skills" />
+                                <FluentCheckbox @bind-Value="hasEventPlanningExperience"
+                                    Label="Event Planning Experience" />
+                                <FluentCheckbox @bind-Value="codesDatabase" Label="Codes Database" />
+                            </FluentStack>
+                        </FluentStack>
+                    </div>
+                </FluentTab>
+
+                <FluentTab Label="Interests" Id="interests">
+                    <div class="tab-content">
+                        <FluentStack Orientation="Orientation.Vertical" Gap="3">
+                            <FluentStack Orientation="Orientation.Vertical" Gap="1">
+                                <FluentCheckbox @bind-Value="hasDriversLicense" Label="Cold calls" />
+                                <FluentCheckbox @bind-Value="canLiftHeavyItems" Label="Block walking" />
+                                <FluentCheckbox @bind-Value="hasFirstAidCertification"
+                                    Label="Underwater Basket weaving" />
+                                <FluentCheckbox @bind-Value="availableWeekends" Label="Web development" />
+                            </FluentStack>
+                        </FluentStack>
+                    </div>
+                </FluentTab>
+
+
+            </FluentTabs>
+        </EditForm>
+    </FluentDialogBody>
+
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Neutral" @onclick="CloseEditDialog" Class="standard-button">Cancel
+        </FluentButton>
+        <FluentButton Appearance="Appearance.Accent" @onclick="UpdateUserAsync" Class="standard-button">Update
+        </FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+<!-- Edit User Dialog -->
+
+@code
+{
+    private Volunteer.Models.User _user = new();
+    private Volunteer.Models.User _editUser = new();
+    private List<Volunteer.Models.User> _userList = new();
+    private FluentDialog? addDialog;
+    private FluentDialog? editDialog;
+    private bool addDialogHidden = true;
+    private bool editDialogHidden = true;
+    private FluentTextField? addFirstNameField;
+    private FluentTextField? editFirstNameField;
+    private string searchText = string.Empty;
+    private string lastNameSearchText = string.Empty;
+    private string phoneSearchText = string.Empty;
+    private string emailSearchText = string.Empty;
+    private string addressSearchText = string.Empty;
+    private bool hasDriversLicense;
+    private bool canLiftHeavyItems;
+    private bool hasFirstAidCertification;
+    private bool availableWeekends;
+    private bool hasOwnTransportation;
+    private bool canWorkWithChildren;
+    private bool speaksBilingually;
+    private bool hasComputerSkills;
+    private bool availableEvenings;
+    private bool hasEventPlanningExperience;
+    private bool codesDatabase;
+    private string activeTabId = "user-info";
+
+    // --------------------------------------------------------------------
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _userList = await _db.User.ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading users: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Search Methods
+    // --------------------------------------------------------------------
+
+    private IQueryable<Volunteer.Models.User> GetFilteredUsers()
+    {
+        var filteredUsers = _userList.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.FirstName != null &&
+            u.FirstName.Contains(searchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(lastNameSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.LastName != null &&
+            u.LastName.Contains(lastNameSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(phoneSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.Phone != null &&
+            u.Phone.Contains(phoneSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(emailSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.Email != null &&
+            u.Email.Contains(emailSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(addressSearchText))
+        {
+            filteredUsers = filteredUsers.Where(u => u.Address1 != null &&
+            u.Address1.Contains(addressSearchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return filteredUsers;
+    }
+
+    // --------------------------------------------------------------------
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void OnLastNameSearchInput(ChangeEventArgs e)
+    {
+        lastNameSearchText = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void OnPhoneSearchInput(ChangeEventArgs e)
+    {
+        phoneSearchText = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void OnEmailSearchInput(ChangeEventArgs e)
+    {
+        emailSearchText = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void OnAddressSearchInput(ChangeEventArgs e)
+    {
+        addressSearchText = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void ClearAllSearches()
+    {
+        searchText = string.Empty;
+        lastNameSearchText = string.Empty;
+        phoneSearchText = string.Empty;
+        emailSearchText = string.Empty;
+        addressSearchText = string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+    // Add User Methods
+    // --------------------------------------------------------------------
+
+    private async Task OpenAddDialog()
+    {
+        _user = new Volunteer.Models.User();
+        addDialogHidden = false;
+        StateHasChanged();
+
+        await Task.Delay(100);
+        addFirstNameField?.FocusAsync();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void CloseAddDialog()
+    {
+        addDialogHidden = true;
+        _user = new Volunteer.Models.User();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task AddUserAsync()
+    {
+        try
+        {
+            var newUser = new Volunteer.Models.User
+            {
+                FirstName = _user.FirstName,
+                LastName = _user.LastName,
+                Phone = _user.Phone,
+                Email = _user.Email,
+                Address1 = _user.Address1
+            };
+
+            _db.User.Add(newUser);
+            await _db.SaveChangesAsync();
+
+            _userList = await _db.User.ToListAsync();
+            CloseAddDialog();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error adding user: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Tab Methods
+    // --------------------------------------------------------------------
+
+    private void OnTabChanged(FluentTab tab)
+    {
+        activeTabId = tab.Id ?? "user-info";
+    }
+
+    // --------------------------------------------------------------------
+    // Edit User Methods
+    // --------------------------------------------------------------------
+
+    private async Task OpenEditDialog(Volunteer.Models.User user)
+    {
+        _editUser = new Volunteer.Models.User
+        {
+            UserId = user.UserId,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Phone = user.Phone,
+            Email = user.Email,
+            Address1 = user.Address1
+        };
+
+        // Reset checkbox values (in real app, these would come from user data)
+        hasDriversLicense = false;
+        canLiftHeavyItems = false;
+        hasFirstAidCertification = false;
+        availableWeekends = false;
+        hasOwnTransportation = false;
+        canWorkWithChildren = false;
+        speaksBilingually = false;
+        hasComputerSkills = false;
+        availableEvenings = false;
+        hasEventPlanningExperience = false;
+        codesDatabase = false;
+
+        activeTabId = "user-info"; // Reset to first tab
+
+        editDialogHidden = false;
+        StateHasChanged();
+
+        await Task.Delay(100);
+        editFirstNameField?.FocusAsync();
+    }
+
+    // --------------------------------------------------------------------
+
+    private void CloseEditDialog()
+    {
+        editDialogHidden = true;
+        _editUser = new Volunteer.Models.User();
+
+        // Reset checkbox values
+        hasDriversLicense = false;
+        canLiftHeavyItems = false;
+        hasFirstAidCertification = false;
+        availableWeekends = false;
+        hasOwnTransportation = false;
+        canWorkWithChildren = false;
+        speaksBilingually = false;
+        hasComputerSkills = false;
+        availableEvenings = false;
+        hasEventPlanningExperience = false;
+        codesDatabase = false;
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task UpdateUserAsync()
+    {
+        try
+        {
+            var existingUser = await _db.User.FindAsync(_editUser.UserId);
+            if (existingUser != null)
+            {
+                existingUser.FirstName = _editUser.FirstName;
+                existingUser.LastName = _editUser.LastName;
+                existingUser.Phone = _editUser.Phone;
+                existingUser.Email = _editUser.Email;
+                existingUser.Address1 = _editUser.Address1;
+
+                await _db.SaveChangesAsync();
+
+                _userList = await _db.User.ToListAsync();
+                CloseEditDialog();
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error updating user: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private async void OnRowDoubleClick(FluentDataGridRow<Volunteer.Models.User> row)
+    {
+        await OpenEditDialog(row.Item!);
+    }
+
+    // --------------------------------------------------------------------
+}

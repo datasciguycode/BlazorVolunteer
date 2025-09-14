@@ -1,0 +1,167 @@
+@rendermode InteractiveServer
+@using Volunteer.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<style>
+    .standard-button {
+        min-width: 100px;
+    }
+</style>
+
+<FluentDialog @bind-Visible="@ShowDialog" Style="width: 400px;">
+    <div class="dialog-content">
+        <h2>Volunteer DB Login</h2>
+        <p>Please enter your password:</p>
+        @* <p class="hint-text">
+            Hint: Use "99" for basic access or "admin123" for full administrative access.
+        </p> *@
+
+        <input @ref="passwordInput" type="password" value="@password"
+            @oninput="@(e => password = e.Value?.ToString() ?? string.Empty)" @onkeyup="@HandleKeyPress"
+            placeholder="Enter password" class="fluent-input" />
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="text-danger mt-2">@errorMessage</div>
+        }
+
+        <div class="dialog-buttons">
+            <FluentButton Appearance="Appearance.Accent" OnClick="@AttemptLogin" Class="standard-button">Login
+            </FluentButton>
+        </div>
+    </div>
+</FluentDialog>
+
+@code {
+    [Inject] private IAuthService AuthService { get; set; } = default!;
+
+    [Parameter] public bool ShowDialog { get; set; }
+    [Parameter] public EventCallback<bool> ShowDialogChanged { get; set; }
+    [Parameter] public EventCallback<bool> OnLoginResult { get; set; }
+
+    private ElementReference passwordInput;
+    private string password = "";
+    private string errorMessage = "";
+
+    private async Task AttemptLogin()
+    {
+        // Use the async ValidatePasswordAsync method
+        if (await AuthService.ValidatePasswordAsync(password))
+        {
+            await OnLoginResult.InvokeAsync(true);
+            await CloseDialog();
+        }
+        else
+        {
+            errorMessage = "Invalid password";
+        }
+    }
+
+    private async Task CloseDialog()
+    {
+        password = "";
+        errorMessage = "";
+        await ShowDialogChanged.InvokeAsync(false);
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AttemptLogin();
+        }
+    }
+
+    // Track when ShowDialog changes to trigger focus
+    private bool _previousShowDialog;
+    private bool _needsFocus;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Mark for focus when dialog opens
+        if (ShowDialog && !_previousShowDialog)
+        {
+            _needsFocus = true;
+        }
+
+        _previousShowDialog = ShowDialog;
+        await base.OnParametersSetAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Focus password input when dialog has been rendered and is open
+        if (_needsFocus && ShowDialog)
+        {
+            _needsFocus = false;
+            await Task.Delay(50); // Small delay for DOM stability
+            await FocusPasswordInput();
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task FocusPasswordInput()
+    {
+        try
+        {
+            await passwordInput.FocusAsync();
+        }
+        catch
+        {
+            // If focus fails on first try, retry once after a short delay
+            try
+            {
+                await Task.Delay(150);
+                await passwordInput.FocusAsync();
+            }
+            catch
+            {
+                // Ignore any focus errors after retry
+            }
+        }
+    }
+}
+
+<style>
+    .dialog-content {
+        padding: 20px;
+    }
+
+    .dialog-buttons {
+        margin-top: 20px;
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+    }
+
+    .fluent-input {
+        width: 100%;
+        height: 32px;
+        padding: 5px 12px;
+        font-family: inherit;
+        font-size: 14px;
+        border: 1px solid #d1d1d1;
+        border-radius: 4px;
+        box-sizing: border-box;
+        margin-bottom: 10px;
+        outline: none;
+        transition: border-color 0.1s ease-in-out;
+    }
+
+    .fluent-input:focus {
+        border-color: #0078d4;
+        box-shadow: 0 0 0 1px #0078d4;
+    }
+
+    .hint-text {
+        font-size: 0.8rem;
+        color: #666;
+        margin-bottom: 15px;
+    }
+
+    .text-danger {
+        color: #dc3545;
+        margin-top: 0.5rem;
+    }
+</style>

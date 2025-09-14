@@ -1,0 +1,298 @@
+@page "/role"
+@rendermode InteractiveServer
+
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components.DataGrid
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Web
+@using Volunteer.Models
+@using Volunteer.Services
+@using Volunteer.Components
+@using RoleModel = Volunteer.Models.Role
+
+@inject IRoleService _roleService
+
+<PageTitle>Roles</PageTitle>
+
+<AuthorizedView RequiresAdmin="true">
+
+<style>
+    .role-grid {
+        --fluent-data-grid-cell-height: 40px;
+    }
+
+    .editable-row {
+        cursor: pointer;
+    }
+
+    .editable-row:hover {
+        background-color: var(--fill-color);
+    }
+
+    .search-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+        margin: 16px 0;
+        align-items: center;
+    }
+
+    .search-input {
+        padding: 6px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        width: 100%;
+    }
+
+    .wide-button {
+        min-width: 120px;
+    }
+
+    .standard-button {
+        min-width: 100px;
+    }
+</style>
+
+<br />
+
+<!-- Add Role and Clear Search Buttons -->
+<div style="margin: 8px 0;">
+    @* <FluentButton Appearance="Appearance.Accent" @onclick="OpenAddDialog" Class="wide-button" style="margin-right: 16px;">Add Role</FluentButton> *@
+    @* <FluentButton Appearance="Appearance.Neutral" @onclick="ClearSearch" Class="standard-button">Clear Search</FluentButton> *@
+</div>
+
+<br />
+
+<!-- Search Field -->
+@* <div class="search-row">
+    <input type="text" id="nameSearch" @bind="searchText" @oninput="OnSearchInput" placeholder="Search by name..."
+        class="search-input" />
+</div> *@
+
+<!-- Datagrid -->
+<FluentDataGrid Items="@GetFilteredRoles()" TGridItem="RoleModel" Class="role-grid"
+    RowClass="@(_ => "editable-row")" OnRowDoubleClick="@OnRowDoubleClick">
+    <PropertyColumn Title="Role" Property="@(p => p.Name)" />
+    <PropertyColumn Title="Password" Property="@(p => p.Password)" />
+    <PropertyColumn Title="Created" Property="@(p => p.DateCreated)" Format="MM/dd/yyyy" />
+    <PropertyColumn Title="Modified" Property="@(p => p.DateModified)" Format="MM/dd/yyyy" />
+    <TemplateColumn Title="Actions">
+        <FluentButton Appearance="Appearance.Lightweight" @onclick="async () => await OpenEditDialog(context)" 
+            IconEnd="@(new Icons.Regular.Size16.Edit())" Title="Edit" />
+        @* <FluentButton Appearance="Appearance.Lightweight" @onclick="() => DeleteRole(context)" 
+            IconEnd="@(new Icons.Regular.Size16.Delete())" Title="Delete" /> *@
+    </TemplateColumn>
+</FluentDataGrid>
+
+<br />
+
+<p style="font-size: 12px; color: #666; margin-top: 8px;">Double-click any row to edit</p>
+
+<!-- Simple Dialog for Add/Edit -->
+<FluentDialog @ref="roleDialog" Hidden="@(!_showDialog)" TrapFocus="true" Modal="true" OnDismiss="CloseDialog" @onkeydown="@((e) => HandleKeyDown(e))">
+    <FluentDialogHeader>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h3 style="margin: 0;">@(_isEditMode ? "Edit Role" : "Add New Role")</h3>
+            <FluentButton 
+                Appearance="Appearance.Lightweight"
+                @onclick="CloseDialog"
+                Title="Finish"
+                IconEnd="@(new Icons.Regular.Size16.Dismiss())"
+                style="min-width: 32px; padding: 4px;" />
+        </div>
+    </FluentDialogHeader>
+
+    <FluentDialogBody>
+        <EditForm Model="@_currentRole" OnValidSubmit="SaveRole" FormName="RoleForm">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <FluentStack Orientation="Orientation.Vertical" Gap="3" Style="min-width: 300px;">
+                <FluentTextField @ref="nameField" Label="Role Name:" @bind-Value="_currentRole.Name"
+                    Required="true" Style="width: 100%;" Disabled="true" />
+                <FluentTextField Label="Password:" @bind-Value="_currentRole.Password"
+                    Style="width: 100%;" />
+            </FluentStack>
+        </EditForm>
+    </FluentDialogBody>
+
+    <FluentDialogFooter>
+        <FluentButton Appearance="Appearance.Accent" @onclick="SaveRole" Class="standard-button">Save</FluentButton>
+        <FluentButton Appearance="Appearance.Neutral" @onclick="CloseDialog" Class="standard-button">Cancel</FluentButton>
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code {
+    private List<RoleModel> _roleList = new();
+    private FluentDialog? roleDialog;
+    private FluentTextField? nameField;
+    private string searchText = string.Empty;
+    private bool _showDialog = false;
+    private bool _isEditMode = false;
+    private RoleModel _currentRole = new();
+
+    // --------------------------------------------------------------------
+    
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _roleList = await _roleService.ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading roles: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Search Methods
+    // --------------------------------------------------------------------
+
+    private IQueryable<RoleModel> GetFilteredRoles()
+    {
+        var filteredRoles = _roleList.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            filteredRoles = filteredRoles.Where(i => i.Name != null &&
+                i.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return filteredRoles.OrderBy(i => i.Name);
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearSearch()
+    {
+        searchText = string.Empty;
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+    // Dialog Methods
+    // --------------------------------------------------------------------
+
+    private async Task OpenAddDialog()
+    {
+        _currentRole = new RoleModel();
+        _isEditMode = false;
+        _showDialog = true;
+        StateHasChanged();
+        await Task.Delay(50); // Small delay to ensure dialog is rendered
+        await FocusNameField();
+    }
+
+    private async Task OpenEditDialog(RoleModel role)
+    {
+        _currentRole = new RoleModel 
+        { 
+            RoleId = role.RoleId, 
+            Name = role.Name,
+            Password = role.Password
+        };
+        _isEditMode = true;
+        _showDialog = true;
+        StateHasChanged();
+        await Task.Delay(50); // Small delay to ensure dialog is rendered
+        await FocusNameField();
+    }
+
+    private void CloseDialog()
+    {
+        _showDialog = false;
+        _currentRole = new RoleModel();
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task SaveRole()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_currentRole.Name))
+                return;
+
+            Console.WriteLine($"Saving Role: ID={_currentRole.RoleId}, Name='{_currentRole.Name}', Password='{_currentRole.Password}', IsEditMode={_isEditMode}");
+
+            if (_isEditMode)
+            {
+                await _roleService.UpdateAsync(_currentRole);
+                Console.WriteLine("Role updated successfully");
+            }
+            else
+            {
+                await _roleService.AddAsync(_currentRole);
+                Console.WriteLine("Role added successfully");
+            }
+
+            _roleList = await _roleService.ToListAsync(); // Refresh the list
+            CloseDialog();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving role: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task DeleteRole(RoleModel role)
+    {
+        try
+        {
+            await _roleService.DeleteAsync(role.RoleId);
+            _roleList = await _roleService.ToListAsync(); // Refresh the list
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error deleting role: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private async void OnRowDoubleClick(FluentDataGridRow<RoleModel> row)
+    {
+        await OpenEditDialog(row.Item!);
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task FocusNameField()
+    {
+        try
+        {
+            if (nameField != null)
+            {
+                await nameField.Element!.FocusAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error setting focus: {ex.Message}");
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseDialog();
+        }
+    }
+
+    // --------------------------------------------------------------------
+}
+
+</AuthorizedView>

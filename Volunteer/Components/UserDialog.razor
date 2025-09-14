@@ -1,0 +1,694 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Volunteer.Models
+@using Volunteer.Services
+@using Microsoft.EntityFrameworkCore
+@using SkillModel = Volunteer.Models.Skill
+@using SourceModel = Volunteer.Models.Source
+@using StatusModel = Volunteer.Models.Status
+
+@inject IAuthService AuthService
+
+<style>
+    /* Dialog dimensions */
+    ::deep .fluent-dialog {
+        min-width: 800px;
+        min-height: 900px;
+        width: 80vw;
+        max-width: 1200px;
+        height: auto;
+        max-height: 95vh;
+    }
+
+    ::deep .fluent-dialog-body {
+        padding: 20px;
+        overflow-y: auto;
+        height: calc(100% - 120px); /* Account for header and footer */
+    }
+
+    /* Form field spacing */
+    ::deep fluent-text-field,
+    ::deep fluent-number-field,
+    ::deep fluent-text-area,
+    ::deep fluent-select {
+        margin-bottom: 16px;
+    }
+
+    /* Button styling */
+    .standard-button {
+        min-width: 100px;
+    }
+
+    .grey-button {
+        background-color: #e0e0e0 !important;
+        color: #333 !important;
+        border: 1px solid #bdbdbd !important;
+    }
+
+    .wide-textarea {
+        width: 100%;
+        min-width: 90px;
+    }
+
+    /* Stack styling for consistent spacing */
+    ::deep fluent-stack {
+        width: 100%;
+    }
+
+    /* Tab content styling */
+    .tab-content {
+        padding: 20px;
+        min-height: 500px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    ::deep .fluent-tabs-panel {
+        min-height: 500px;
+    }
+
+    /* Skills and Interests tab styling */
+    .tab-content ul {
+        margin: 0;
+        padding: 0;
+        list-style-type: none;
+        margin-top: 16px;
+        min-height: 300px;
+    }
+</style>
+
+<!--  User Dialog (Add/Edit) -->
+<FluentDialog @ref="userDialog" Hidden="@(!DialogState.IsVisible)" TrapFocus="true" Modal="true" @onkeydown="@(async (e) => await HandleKeyDown(e))">
+    <FluentDialogHeader>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h3 style="margin: 0;">@(DialogState.IsEditMode ? "Update Volunteer" : "Add New Volunteer")</h3>
+            <FluentButton 
+                Appearance="Appearance.Lightweight"
+                @onclick="HandleCancel"
+                Title="Finish"
+                IconEnd="@(new Icons.Regular.Size16.Dismiss())"
+                style="min-width: 32px; padding: 4px;" />
+        </div>
+    </FluentDialogHeader>
+
+    <FluentDialogBody>
+        <EditForm Model="@DialogState.CurrentUser" OnValidSubmit="HandleSave" FormName="UserForm">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            @if (!string.IsNullOrEmpty(DialogState.ErrorMessage))
+            {
+                <div style="background-color: #f8d7da; color: #721c24; padding: 12px; border: 1px solid #f5c6cb; border-radius: 4px; margin-bottom: 16px;">
+                    <strong>Error:</strong> @DialogState.ErrorMessage
+                </div>
+            }
+
+            <FluentTabs Class="dialog-tabs" ActiveTabId="@DialogState.ActiveTabId" OnTabChange="OnTabChanged">
+                <FluentTab Label="Volunteer" Id="users">
+                    <div class="tab-content">
+                        <FluentStack Orientation="Orientation.Horizontal" Gap="4">
+                            <FluentStack Orientation="Orientation.Vertical" Gap="3" Style="flex: 1;">
+                                <FluentTextField @ref="firstNameField" Label="First Name:" @bind-Value="DialogState.CurrentUser.FirstName"
+                                    Required="true" ReadOnly="@(!IsEditable)" />
+                                <FluentTextField Label="Last Name:" @bind-Value="DialogState.CurrentUser.LastName" Required="true" ReadOnly="@(!IsEditable)" />
+                                <FluentTextField Label="Phone:" @bind-Value="PhoneInput" InputMode="InputMode.Telephone" placeholder="(123) 456-7890" maxlength="14" ReadOnly="@(!IsEditable)" />
+                                <FluentTextField Label="Email:" @bind-Value="DialogState.CurrentUser.Email" InputMode="InputMode.Email" 
+                                    type="email" placeholder="example@email.com" @onchange="@ValidateEmailOnChange" ReadOnly="@(!IsEditable)" />
+                                @if (!string.IsNullOrEmpty(_emailError))
+                                {
+                                    <div style="color: red; font-size: 12px; margin-top: -8px;">@_emailError</div>
+                                }
+                                <FluentTextField Label="Address:" @bind-Value="DialogState.CurrentUser.Address1" ReadOnly="@(!IsEditable)" />
+                            </FluentStack>
+                            <FluentStack Orientation="Orientation.Vertical" Gap="3" Style="flex: 1;">
+                                <FluentNumberField Label="Precinct #:" @bind-Value="DialogState.CurrentUser.PrecinctNumber" ReadOnly="@(!IsEditable)" />
+                                <FluentNumberField Label="Group #:" @bind-Value="DialogState.CurrentUser.GroupNumber" ReadOnly="@(!IsEditable)" />
+                                <FluentNumberField Label="District #:" @bind-Value="DialogState.CurrentUser.DistrictNumber" ReadOnly="@(!IsEditable)" />
+
+                                <FluentSelect TOption="string" Label="Source:" Value="@(DialogState.CurrentUser.SourceId.ToString() ?? "")" ValueChanged="OnSourceSelected" Disabled="@(!IsEditable)">
+                                    <option value="">-- Select --</option>
+                                    @foreach (var source in SourcesList)
+                                    {
+                                        <option value="@source.SourceId.ToString()">@source.Name</option>
+                                    }
+                                </FluentSelect>
+
+                                <FluentSelect TOption="string" Label="Status:" Value="@(DialogState.CurrentUser.StatusId.ToString() ?? "")" ValueChanged="OnStatusSelected" Disabled="@(!IsEditable)">
+                                    <option value="">-- Select --</option>
+                                    @foreach (var status in StatusList)
+                                    {
+                                        <option value="@status.StatusId.ToString()">@status.Name</option>
+                                    }
+                                </FluentSelect>
+
+                            </FluentStack>
+                        </FluentStack>
+                    </div>
+                </FluentTab>
+                
+
+                @if (DialogState.CurrentUser.UserId != 0)
+                {
+                    <FluentTab Label="Skills" Id="skills">
+                        <div class="tab-content">
+                            <FluentStack Orientation="Orientation.Vertical" Gap="3">
+                                <!-- Dropdown for selecting a skill -->
+                                <FluentSelect TOption="string" Value="@selectedSkillId" Style="max-width: 300px;" ValueChanged="OnSkillSelected" Disabled="@(!IsEditable)">
+                                    <option value="">-- Select a skill -- </option>
+                                    @foreach (var skill in SkillsList)
+                                    {
+                                        <option value="@skill.SkillId.ToString()">@skill.Name</option>
+                                    }
+                                </FluentSelect>
+                                @if (UserSkillsForDialogUser != null && UserSkillsForDialogUser.Count > 0)
+                                {
+                                    <ul style="margin:0; padding:0; list-style-type:none;">
+                                        @foreach (var us in UserSkillsForDialogUser)
+                                        {
+                                            <li style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #eee;">
+                                                <span>@us.Skill?.Name</span>
+                                                @if (IsEditable)
+                                                {
+                                                    <span @onclick="() => OnDeleteUserSkillClicked(us.UserSkillId)" title="Remove" style="margin-left:16px; font-size:16px; cursor:pointer; user-select:none; font-weight:bold;">X</span>
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            </FluentStack>
+                        </div>
+                    </FluentTab>
+
+                    <FluentTab Label="Interests" Id="interests">
+                        <div class="tab-content">
+                            <FluentStack Orientation="Orientation.Vertical" Gap="3">
+
+                                <FluentSelect TOption="string" Value="@selectedInterestId" Style="max-width: 300px;" ValueChanged="OnInterestSelected" Disabled="@(!IsEditable)">
+                                    <option value="">-- Select an interest -- </option>
+                                    @foreach (var interest in InterestsList)
+                                    {
+                                        <option value="@interest.InterestId.ToString()">@interest.Name</option>
+                                    }
+                                </FluentSelect>
+                                @if (UserInterestsForDialogUser != null && UserInterestsForDialogUser.Count > 0)
+                                {
+                                    <ul style="margin:0; padding:0; list-style-type:none;">
+                                        @foreach (var us in UserInterestsForDialogUser)
+                                        {
+                                            <li style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #eee;">
+                                                <span>@us.Interest?.Name</span>
+                                                @if (IsEditable)
+                                                {
+                                                    <span @onclick="() => OnDeleteUserInterestClicked(us.UserInterestId)" title="Remove" style="margin-left:16px; font-size:16px; cursor:pointer; user-select:none; font-weight:bold;">X</span>
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                }                                
+                            </FluentStack>
+                        </div>
+                    </FluentTab>
+                }
+
+            </FluentTabs>
+
+        </EditForm>
+    </FluentDialogBody>
+
+    <FluentDialogFooter>
+        <br />
+        <br />
+
+    @if (DialogState.ActiveTabId == "users")
+    {
+        <FluentButton Appearance="Appearance.Neutral" @onclick="HandleCancel" Class="standard-button grey-button">
+            Cancel
+        </FluentButton>
+
+        @if (DialogState.CurrentUser.UserId != 0)
+        {
+            @if (AuthService.CanEdit || (AuthService.IsBasicUser && DialogState.IsEditMode))
+            {
+                <FluentButton Appearance="Appearance.Accent" @onclick="HandleSave" Class="standard-button">
+                    Update
+                </FluentButton>
+            }
+
+            <FluentButton Appearance="Appearance.Neutral" @onclick="ShowSkills" Class="standard-button grey-button">
+                Next &raquo;
+            </FluentButton>
+        }
+        else
+        {
+            @if (AuthService.CanAdd)
+            {
+                <FluentButton Appearance="Appearance.Accent" @onclick="HandleSave" Class="standard-button">
+                    Save
+                </FluentButton>
+            }
+        }
+    }
+
+    @if (DialogState.ActiveTabId == "skills")
+    {
+        <FluentButton Appearance="Appearance.Neutral" @onclick="ShowUser" Class="standard-button grey-button">
+            &laquo; Previous
+        </FluentButton>
+
+        <FluentButton Appearance="Appearance.Neutral" @onclick="ShowInterests" Class="standard-button grey-button">
+            Next &raquo;
+        </FluentButton> 
+    }
+
+    @if ((DialogState.ActiveTabId == "interests"))
+    {
+        <FluentButton Appearance="Appearance.Neutral" @onclick="ShowSkills" Class="standard-button grey-button">
+            &laquo; Previous
+        </FluentButton>
+
+        <FluentButton Appearance="Appearance.Neutral" @onclick="HandleCancel" Class="standard-button grey-button">
+            Finish
+        </FluentButton> 
+    }
+
+    </FluentDialogFooter>
+</FluentDialog>
+
+@code 
+{
+
+    [Parameter] public EventCallback<DialogAction> OnDialogAction { get; set; }
+
+    private async Task OnDeleteUserSkillClicked(int userSkillId)
+    {
+        if (OnDialogAction.HasDelegate)
+        {
+            await OnDialogAction.InvokeAsync(DialogAction.DeleteSkill(userSkillId));
+            await LoadUserSkills();
+            selectedSkillId = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnDeleteUserInterestClicked(int userInterestId)
+    {
+        if (OnDialogAction.HasDelegate)
+        {
+            await OnDialogAction.InvokeAsync(DialogAction.DeleteInterest(userInterestId));
+            await LoadUserInterests();
+            selectedInterestId = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    [Inject] private VolunteerContext? _db { get; set; }
+    private List<UserSkill> UserSkillsForDialogUser = new();
+    private List<UserInterest> UserInterestsForDialogUser = new();
+    [Parameter] public List<SkillModel> SkillsList { get; set; } = new();
+    [Parameter] public List<SourceModel> SourcesList { get; set; } = new();
+    [Parameter] public List<StatusModel> StatusList { get; set; } = new();
+    [Parameter] public List<Interest> InterestsList { get; set; } = new();
+    private string? selectedSkillId = string.Empty;
+    private string? selectedInterestId = string.Empty;
+
+    // --------------------------------------------------------------------
+    // Generic Selection Handler
+    // --------------------------------------------------------------------
+
+    private async Task<string> HandleItemSelection<T>(
+        string value, 
+        List<T> existingItems, 
+        Func<T, int> getItemId,
+        Func<int, object> createNewItem,
+        Func<Task> refreshData) where T : class
+    {
+        if (string.IsNullOrEmpty(value) || !int.TryParse(value, out int itemId))
+            return value;
+
+        // Prevent duplicates
+        if (existingItems.Any(item => getItemId(item) == itemId))
+            return value;
+
+        if (_db != null && DialogState.CurrentUser.UserId != 0)
+        {
+            var newItem = createNewItem(itemId);
+            _db.Entry(newItem).State = EntityState.Added;
+            await _db.SaveChangesAsync();
+            await refreshData();
+            StateHasChanged();
+            return string.Empty; // Clear selection after successful add
+        }
+        
+        return value;
+    }
+
+    // --------------------------------------------------------------------
+    // Skill Selection Handler
+    // --------------------------------------------------------------------
+
+    private async Task OnSkillSelected(string value)
+    {
+        selectedSkillId = await HandleItemSelection(
+            value,
+            UserSkillsForDialogUser,
+            us => us.SkillId,
+            skillId => new UserSkill { UserId = DialogState.CurrentUser.UserId, SkillId = skillId },
+            LoadUserSkills
+        );
+    }
+
+    // --------------------------------------------------------------------
+    
+    private async Task OnInterestSelected(string value)
+    {
+        selectedInterestId = await HandleItemSelection(
+            value,
+            UserInterestsForDialogUser,
+            ui => ui.InterestId,
+            interestId => new UserInterest { UserId = DialogState.CurrentUser.UserId, InterestId = interestId },
+            LoadUserInterests
+        );
+    }
+
+    // --------------------------------------------------------------------
+    
+    private async Task OnSourceSelected(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            DialogState.CurrentUser.SourceId = 0;
+        }
+        else if (int.TryParse(value, out int sourceId))
+        {
+            DialogState.CurrentUser.SourceId = sourceId;
+        }
+        else
+        {
+            // Handle invalid value - this shouldn't happen with a dropdown
+            DialogState.CurrentUser.SourceId = 0;
+        }
+        await DialogStateChanged.InvokeAsync(DialogState);
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+    
+    private async Task OnStatusSelected(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            DialogState.CurrentUser.StatusId = 1; // Set to default status 1
+        }
+        else if (int.TryParse(value, out int statusId))
+        {
+            DialogState.CurrentUser.StatusId = statusId;
+        }
+        else
+        {
+            // Handle invalid value - this shouldn't happen with a dropdown
+            DialogState.CurrentUser.StatusId = 1; // Set to default status 1
+        }
+        await DialogStateChanged.InvokeAsync(DialogState);
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    [Parameter] public DialogState DialogState { get; set; } = new();
+    [Parameter] public EventCallback<DialogState> DialogStateChanged { get; set; }
+
+    private FluentDialog? userDialog;
+    private FluentTextField? firstNameField;
+    private string _emailError = string.Empty;
+
+    // Computed property to determine if the dialog should allow editing
+    private bool IsEditable => !DialogState.IsEditMode || AuthService.CanEdit || (AuthService.IsBasicUser && DialogState.IsEditMode);
+
+    // --------------------------------------------------------------------
+    // Public Methods for Parent Component
+    // --------------------------------------------------------------------
+
+    private async Task InitializeDialog()
+    {
+        _emailError = string.Empty;
+        await DialogStateChanged.InvokeAsync(DialogState);
+        await RefreshUserData();
+        StateHasChanged();
+
+        // Ensure focus is set after the dialog and tab are fully rendered
+        await Task.Delay(200);
+        if (DialogState.ActiveTabId == "users")
+        {
+            firstNameField?.FocusAsync();
+        }
+    }
+
+    public async Task ShowEditDialog(Volunteer.Models.User user)
+    {
+        DialogState.ShowForEdit(user);
+        await InitializeDialog();
+    }
+
+    public async Task ShowAddDialog()
+    {
+        DialogState.ShowForAdd();
+        DialogState.CurrentUser.StatusId = 1; // Set default status to 1
+        await InitializeDialog();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task RefreshUserData()
+    {
+        await LoadUserSkills();
+        await LoadUserInterests();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task LoadUserSkills()
+    {
+        UserSkillsForDialogUser = new List<UserSkill>();
+        if (_db != null && DialogState.CurrentUser.UserId != 0)
+        {
+            UserSkillsForDialogUser = await _db.UserSkill
+                .Include(us => us.Skill)
+                .Where(us => us.UserId == DialogState.CurrentUser.UserId)
+                .ToListAsync();
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task LoadUserInterests()
+    {
+        UserInterestsForDialogUser = new List<UserInterest>();
+        if (_db != null && DialogState.CurrentUser.UserId != 0)
+        {
+            UserInterestsForDialogUser = await _db.UserInterest
+                .Include(ui => ui.Interest)
+                .Where(ui => ui.UserId == DialogState.CurrentUser.UserId)
+                .ToListAsync();
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Event Handlers
+    // --------------------------------------------------------------------
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await HandleCancel();
+        }
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task HandleSave()
+    {
+        await OnDialogAction.InvokeAsync(DialogAction.Save());
+        await Task.Delay(100); // Give the save operation time to complete
+        
+        if (!DialogState.IsEditMode && DialogState.CurrentUser.UserId != 0)
+        {
+            // If this was a new user save and we now have an ID, switch to edit mode
+            DialogState.IsEditMode = true;
+            await Task.Delay(100); // Give the UI time to update
+            // Stay on the same tab but prepare edit mode data
+            await RefreshUserData();
+        }
+        else if (DialogState.IsEditMode)
+        {
+            // For updates, just refresh the UI
+            await RefreshUserData();
+        }
+        
+        await InvokeAsync(StateHasChanged); // Refresh the UI on the UI thread
+    }
+    
+    // --------------------------------------------------------------------
+
+    private async Task HandleCancel()
+    {
+        DialogState.Reset();
+        _emailError = string.Empty;
+        await DialogStateChanged.InvokeAsync(DialogState);
+        await OnDialogAction.InvokeAsync(DialogAction.Cancel());
+    }
+    
+    // --------------------------------------------------------------------
+
+    private async void OnTabChanged(FluentTab tab)
+    {
+        DialogState.ActiveTabId = tab.Id ?? "users";
+        await DialogStateChanged.InvokeAsync(DialogState);
+        StateHasChanged();
+
+        // Focus the FirstName field when switching to the users tab
+        if (DialogState.ActiveTabId == "users")
+        {
+            await Task.Delay(50);
+            firstNameField?.FocusAsync();
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Phone Formatting with property
+    // --------------------------------------------------------------------
+
+    private string PhoneInput
+    {
+        get => DialogState.CurrentUser.Phone ?? string.Empty;
+        set
+        {
+            var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+            
+            if (digits.Length > 10)
+                digits = digits[..10];
+            var formatted = digits.Length switch
+            {
+                0 => string.Empty,
+                <= 3 => digits,
+                <= 6 => $"({digits[..3]}) {digits[3..]}",
+                <= 10 => $"({digits[..3]}) {digits[3..6]}-{digits[6..]}",
+                _ => value
+            };
+            if (DialogState.CurrentUser != null)
+            {
+                DialogState.CurrentUser.Phone = formatted ?? string.Empty;
+            }
+            _ = Task.Run(async () => await DialogStateChanged.InvokeAsync(DialogState));
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Email Validation
+    // --------------------------------------------------------------------
+
+    private bool IsValidEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return false;
+
+        try
+        {
+            var addr = new System.Net.Mail.MailAddress(email);
+            return addr.Address == email;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+    
+    // --------------------------------------------------------------------
+
+    private async void ValidateEmailOnChange(ChangeEventArgs e)
+    {
+        var email = e.Value?.ToString() ?? string.Empty;
+        
+        // Update the model
+        DialogState.CurrentUser.Email = email;
+
+        // Validate email format
+        string errorMessage = string.Empty;
+        
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            if (!email.Contains('@'))
+                errorMessage = "Email must contain an @ symbol";
+            else if (!HasDomainExtension(email))
+                errorMessage = "Email must have a domain extension (e.g., .com, .org)";
+            else if (!IsValidEmail(email))
+                errorMessage = "Please enter a valid email address";
+        }
+
+        // Set error message
+        _emailError = errorMessage;
+        await DialogStateChanged.InvokeAsync(DialogState);
+        StateHasChanged();
+    }
+    
+    // --------------------------------------------------------------------
+
+    private bool HasDomainExtension(string email)
+    {
+        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+            return false;
+
+        var parts = email.Split('@');
+        if (parts.Length != 2)
+            return false;
+
+        var domain = parts[1];
+        
+        // Check if domain has at least one dot and something after it
+        var lastDotIndex = domain.LastIndexOf('.');
+        if (lastDotIndex == -1 || lastDotIndex == domain.Length - 1)
+            return false;
+
+        // Extension should be at least 2 characters
+        var extension = domain.Substring(lastDotIndex + 1);
+        return extension.Length >= 2 && extension.All(char.IsLetter);
+    }
+    
+    // --------------------------------------------------------------------
+
+    private async Task NavigateToTab(string tabId)
+    {
+        // For skills and interests tabs, only proceed if we have a valid user ID
+        if ((tabId == "skills" || tabId == "interests") && DialogState.CurrentUser.UserId == 0)
+            return;
+
+        DialogState.ActiveTabId = tabId;
+        await DialogStateChanged.InvokeAsync(DialogState);
+
+        // Refresh data based on the tab
+        switch (tabId)
+        {
+            case "skills":
+                await LoadUserSkills();
+                break;
+            case "interests":
+                await LoadUserInterests();
+                break;
+            case "users":
+                // Focus the FirstName field when switching to the users tab
+                await Task.Delay(50);
+                firstNameField?.FocusAsync();
+                break;
+        }
+
+        StateHasChanged();
+    }
+
+    // --------------------------------------------------------------------
+
+    private async Task ShowSkills() => await NavigateToTab("skills");
+    private async Task ShowInterests() => await NavigateToTab("interests");
+    private async void ShowUser() => await NavigateToTab("users");
+
+    // --------------------------------------------------------------------
+}

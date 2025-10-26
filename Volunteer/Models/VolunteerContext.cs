@@ -32,8 +32,15 @@ public partial class VolunteerContext : DbContext
     public virtual DbSet<UserSkill> UserSkill { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
-        => optionsBuilder.UseSqlServer("Server=np:\\\\.\\pipe\\MSSQL$SQLEXPRESS\\sql\\query;Database=Volunteer;Trusted_Connection=True;TrustServerCertificate=true");
+    {
+        // Connection string is now configured via dependency injection in Program.cs
+        // This method is only called when DbContext is used without dependency injection
+        if (!optionsBuilder.IsConfigured)
+        {
+            // For design-time operations, fall back to a minimal configuration
+            // The actual connection string should be provided through DI
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

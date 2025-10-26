@@ -923,9 +923,9 @@ else
     // --------------------------------------------------------------------
 
     // Listen for authentication state changes to clear session state
-    [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; }
+    [Inject] public required AuthenticationStateProvider AuthStateProvider { get; set; }
 
-    [Inject] private NavigationManager NavigationManager { get; set; }
+    [Inject] public required NavigationManager NavigationManager { get; set; }
 
     protected override void OnInitialized()
     {

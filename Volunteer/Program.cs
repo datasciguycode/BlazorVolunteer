@@ -21,9 +21,25 @@ builder.Services.AddFluentUIComponents();
 builder.Services.AddDbContext<VolunteerContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+// ...existing code...
+// Read timeout configuration once
+var timeoutMinutes = builder.Configuration.GetValue<int>("BlazorServer:TimeoutMinutes", 20);
+var timeout = TimeSpan.FromMinutes(timeoutMinutes);
+
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-builder.Services.AddFluentUIComponents();
+    .AddInteractiveServerComponents(options =>
+    {
+        options.DisconnectedCircuitRetentionPeriod = timeout;
+        options.JSInteropDefaultCallTimeout = timeout;
+    });
+    
+builder.Services.AddSignalR(options =>
+{
+    options.ClientTimeoutInterval = timeout;
+    options.KeepAliveInterval = TimeSpan.FromMinutes(timeoutMinutes / 4);
+});
+// ...existing code...
+
 builder.Services.AddScoped<UserSessionState>();
 
 var app = builder.Build();
@@ -37,7 +53,7 @@ using (var scope = app.Services.CreateScope())
     try
     {
         // Ensure database is created
-        context.Database.EnsureCreated();
+        await context.Database.EnsureCreatedAsync();
 
         // Check if Admin role exists, if not create it
         var roles = await roleService.ToListAsync();

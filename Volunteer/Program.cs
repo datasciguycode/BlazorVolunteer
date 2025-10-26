@@ -44,45 +44,6 @@ builder.Services.AddScoped<UserSessionState>();
 
 var app = builder.Build();
 
-// Seed data for testing
-using (var scope = app.Services.CreateScope())
-{
-    var context = scope.ServiceProvider.GetRequiredService<VolunteerContext>();
-    var roleService = scope.ServiceProvider.GetRequiredService<IRoleService>();
-
-    try
-    {
-        // Ensure database is created
-        await context.Database.EnsureCreatedAsync();
-
-        // Check if Admin role exists, if not create it
-        var roles = await roleService.ToListAsync();
-        if (!roles.Any(r => r.Name.Equals("Admin", StringComparison.OrdinalIgnoreCase)))
-        {
-            var adminRole = new Role { Name = "Admin", Password = "admin" };
-            await roleService.AddAsync(adminRole);
-        }
-
-        // Check if Basic role exists, if not create it
-        if (!roles.Any(r => r.Name.Equals("Basic", StringComparison.OrdinalIgnoreCase)))
-        {
-            var basicRole = new Role { Name = "Basic", Password = "basic" };
-            await roleService.AddAsync(basicRole);
-        }
-
-        // Check if Power role exists, if not create it
-        if (!roles.Any(r => r.Name.Equals("Power", StringComparison.OrdinalIgnoreCase)))
-        {
-            var powerRole = new Role { Name = "Power", Password = "power" };
-            await roleService.AddAsync(powerRole);
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error seeding data: {ex.Message}");
-    }
-}
-
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {

@@ -3,6 +3,7 @@ using Volunteer.Components;
 using Microsoft.EntityFrameworkCore;
 using Volunteer.Models;
 using Volunteer.Services;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,8 +29,7 @@ if (string.IsNullOrEmpty(connectionString))
 builder.Services.AddDbContext<VolunteerContext>(options =>
     options.UseSqlServer(connectionString));
 
-// ...existing code...
-// Read timeout configuration once
+// Timeout configuration
 var timeoutMinutes = builder.Configuration.GetValue<int>("BlazorServer:TimeoutMinutes", 20);
 var timeout = TimeSpan.FromMinutes(timeoutMinutes);
 
@@ -38,18 +38,40 @@ builder.Services.AddRazorComponents()
     {
         options.DisconnectedCircuitRetentionPeriod = timeout;
         options.JSInteropDefaultCallTimeout = timeout;
+        options.DetailedErrors = true;
     });
     
 builder.Services.AddSignalR(options =>
 {
-    options.ClientTimeoutInterval = timeout;
-    options.KeepAliveInterval = TimeSpan.FromMinutes(timeoutMinutes / 4);
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);  // Default client timeout
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);      // Send keep-alive every 15 seconds
+    options.HandshakeTimeout = TimeSpan.FromSeconds(15);       // Handshake timeout
+    options.MaximumParallelInvocationsPerClient = 10;
 });
-// ...existing code...
+
+builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
 builder.Services.AddScoped<UserSessionState>();
 
+// Add circuit handler for diagnostics
+builder.Services.AddScoped<CircuitHandler, DiagnosticCircuitHandler>();
+
 var app = builder.Build();
+
+// Add error logging middleware
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "[ERROR MIDDLEWARE] Unhandled exception: {Message}", ex.Message);
+        throw;
+    }
+});
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -78,3 +100,37 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+public class DiagnosticCircuitHandler : CircuitHandler
+{
+    private readonly ILogger<DiagnosticCircuitHandler> _logger;
+
+    public DiagnosticCircuitHandler(ILogger<DiagnosticCircuitHandler> logger)
+    {
+        _logger = logger;
+    }
+
+    public override async Task OnCircuitOpenedAsync(Circuit circuit, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("[DIAGNOSTIC] Circuit opened: {CircuitId}", circuit.Id);
+        await base.OnCircuitOpenedAsync(circuit, cancellationToken);
+    }
+
+    public override async Task OnCircuitClosedAsync(Circuit circuit, CancellationToken cancellationToken)
+    {
+        _logger.LogError("[DIAGNOSTIC] *** CIRCUIT CRASH *** Circuit closed/disconnected: {CircuitId}", circuit.Id);
+        await base.OnCircuitClosedAsync(circuit, cancellationToken);
+    }
+
+    public override async Task OnConnectionUpAsync(Circuit circuit, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("[DIAGNOSTIC] Connection established: {CircuitId}", circuit.Id);
+        await base.OnConnectionUpAsync(circuit, cancellationToken);
+    }
+
+    public override async Task OnConnectionDownAsync(Circuit circuit, CancellationToken cancellationToken)
+    {
+        _logger.LogWarning("[DIAGNOSTIC] Connection dropped: {CircuitId}", circuit.Id);
+        await base.OnConnectionDownAsync(circuit, cancellationToken);
+    }
+}

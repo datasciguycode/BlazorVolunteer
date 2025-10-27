@@ -1,3 +1,5 @@
+@implements IAsyncDisposable
+
 @page "/"
 @rendermode InteractiveServer
 
@@ -225,28 +227,50 @@ else
     {
         try
         {
+            Console.WriteLine("[USER.RAZOR] OnInitializedAsync starting...");
+            
             // If user has Basic role, don't load any existing records
             if (AuthService.IsBasicUser)
             {
                 _userList = new List<Volunteer.Models.User>(); // Empty list for Basic users
+                Console.WriteLine("[USER.RAZOR] Basic user detected, empty list loaded");
             }
             else
             {
                 // Load the specified number of users for non-Basic users
+                Console.WriteLine($"[USER.RAZOR] Loading top {recordLimit} users...");
                 _userList = await UserService.GetTopUsersAsync(recordLimit);
+                Console.WriteLine($"[USER.RAZOR] Loaded {_userList.Count} users");
             }
                 
             // Get total count for display (always show total count regardless of role)
+            Console.WriteLine("[USER.RAZOR] Getting total user count...");
             totalUserCount = await UserService.GetTotalUserCountAsync();
+            Console.WriteLine($"[USER.RAZOR] Total user count: {totalUserCount}");
             
+            Console.WriteLine("[USER.RAZOR] Loading skills...");
             _skillList = await _db.Skill.OrderBy(s => s.Name).ToListAsync();
+            Console.WriteLine($"[USER.RAZOR] Loaded {_skillList.Count} skills");
+            
+            Console.WriteLine("[USER.RAZOR] Loading interests...");
             _interestList = await _db.Interest.OrderBy(i => i.Name).ToListAsync();
+            Console.WriteLine($"[USER.RAZOR] Loaded {_interestList.Count} interests");
+            
+            Console.WriteLine("[USER.RAZOR] Loading sources...");
             _sourceList = await _db.Source.OrderBy(s => s.Name).ToListAsync();
+            Console.WriteLine($"[USER.RAZOR] Loaded {_sourceList.Count} sources");
+            
+            Console.WriteLine("[USER.RAZOR] Loading statuses...");
             _statusList = await _db.Status.OrderBy(s => s.Name).ToListAsync();
+            Console.WriteLine($"[USER.RAZOR] Loaded {_statusList.Count} statuses");
+            
+            Console.WriteLine("[USER.RAZOR] OnInitializedAsync completed successfully!");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error loading users or skills: {ex.Message}");
+            Console.WriteLine($"[USER.RAZOR] ERROR in OnInitializedAsync: {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[USER.RAZOR] Stack trace: {ex.StackTrace}");
+            throw; // Re-throw to see the error
         }
     }
 
@@ -929,7 +953,19 @@ else
 
     protected override void OnInitialized()
     {
-        AuthStateProvider.AuthenticationStateChanged += async (task) =>
+        try
+        {
+            AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[USER.RAZOR] Error in OnInitialized: {ex.Message}");
+        }
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        try
         {
             var authState = await task;
             if (!authState.User.Identity?.IsAuthenticated ?? true)
@@ -940,6 +976,15 @@ else
                 // Force a full page reload by navigating to the home page
                 NavigationManager.NavigateTo("/", forceLoad: true);
             }
-        };
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[USER.RAZOR] Error in OnAuthenticationStateChanged: {ex.Message}");
+        }
+    }
+
+    async ValueTask IAsyncDisposable.DisposeAsync()
+    {
+        AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
     }
 }

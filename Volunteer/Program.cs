@@ -110,27 +110,9 @@ public class DiagnosticCircuitHandler : CircuitHandler
         _logger = logger;
     }
 
-    public override async Task OnCircuitOpenedAsync(Circuit circuit, CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("[DIAGNOSTIC] Circuit opened: {CircuitId}", circuit.Id);
-        await base.OnCircuitOpenedAsync(circuit, cancellationToken);
-    }
-
     public override async Task OnCircuitClosedAsync(Circuit circuit, CancellationToken cancellationToken)
     {
-        _logger.LogError("[DIAGNOSTIC] *** CIRCUIT CRASH *** Circuit closed/disconnected: {CircuitId}", circuit.Id);
+        _logger.LogWarning("Circuit disconnected: {CircuitId}", circuit.Id);
         await base.OnCircuitClosedAsync(circuit, cancellationToken);
-    }
-
-    public override async Task OnConnectionUpAsync(Circuit circuit, CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("[DIAGNOSTIC] Connection established: {CircuitId}", circuit.Id);
-        await base.OnConnectionUpAsync(circuit, cancellationToken);
-    }
-
-    public override async Task OnConnectionDownAsync(Circuit circuit, CancellationToken cancellationToken)
-    {
-        _logger.LogWarning("[DIAGNOSTIC] Connection dropped: {CircuitId}", circuit.Id);
-        await base.OnConnectionDownAsync(circuit, cancellationToken);
     }
 }

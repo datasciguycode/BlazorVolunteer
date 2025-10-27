@@ -18,8 +18,15 @@ builder.Services.AddScoped<IStatusService, StatusService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddFluentUIComponents();
 
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+if (string.IsNullOrEmpty(connectionString))
+{
+    throw new InvalidOperationException("DefaultConnection string is not configured.");
+}
+
 builder.Services.AddDbContext<VolunteerContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(connectionString));
 
 // ...existing code...
 // Read timeout configuration once

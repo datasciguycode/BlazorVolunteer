@@ -69,7 +69,8 @@ app.Use(async (context, next) =>
     {
         var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "[ERROR MIDDLEWARE] Unhandled exception: {Message}", ex.Message);
-        throw;
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        // Don't rethrow - let the exception handler middleware handle it
     }
 });
 
@@ -89,9 +90,9 @@ if (!app.Environment.IsDevelopment())
         context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
         await next();
     });
-}
 
-app.UseHttpsRedirection();
+    app.UseHttpsRedirection();
+}
 
 app.UseAntiforgery();
 
